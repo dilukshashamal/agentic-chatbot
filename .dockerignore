@@ -1,10 +1,11 @@
+.git
+.gitignore
 .env
-venv
+venv/
 __pycache__/
 *.pyc
 backend/.env
+backend/data/uploads/
 frontend/.env.local
 frontend/node_modules/
 frontend/.next/
-backend/data/chunks.json
-backend/data/uploads/

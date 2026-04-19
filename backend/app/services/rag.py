@@ -1,20 +1,25 @@
 import json
 from typing import Any
+from uuid import UUID
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.db.models import DocumentRecord
 from app.models.schemas import BuildIndexResponse, ChatRequest, ChatResponse, Citation, LLMAnswer, SystemStatus
 from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.indexing import build_index
-from app.services.retrieval import HybridRetriever
+from app.services.retrieval import PgVectorRetriever
 
 
 class RAGService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, session: Session) -> None:
         self.settings = settings
-        self.retriever = HybridRetriever(settings)
+        self.session = session
+        self.retriever = PgVectorRetriever(settings, session)
         self._llm: ChatGoogleGenerativeAI | None = None
         self._prompt = ChatPromptTemplate.from_messages(
             [
@@ -43,13 +48,6 @@ class RAGService:
                 ),
             ]
         )
-
-        if (
-            self.settings.allow_index_auto_build
-            and self.settings.google_api_key
-            and not self.retriever.is_ready()
-        ):
-            self.rebuild_index()
 
     def _get_llm(self) -> ChatGoogleGenerativeAI:
         if self._llm is None:
@@ -102,7 +100,7 @@ class RAGService:
         for chunk in chunks:
             page_label = chunk.page_number if chunk.page_number is not None else "Unknown"
             blocks.append(
-                f"[{chunk.chunk_id}] Page {page_label} | score={chunk.score}\n{chunk.content}"
+                f"[{chunk.chunk_id}] Source {chunk.source} | Page {page_label} | score={chunk.score}\n{chunk.content}"
             )
         return "\n\n".join(blocks)
 
@@ -121,6 +119,7 @@ class RAGService:
             citations.append(
                 Citation(
                     chunk_id=chunk.chunk_id,
+                    source=chunk.source,
                     page=chunk.page_number,
                     score=chunk.score,
                     excerpt=trim_excerpt(chunk.content),
@@ -135,23 +134,37 @@ class RAGService:
             return 0.0
         return round(sum(chunk.score for chunk in chunks) / len(chunks), 2)
 
-    def rebuild_index(self) -> BuildIndexResponse:
-        result = build_index(self.settings)
-        self.retriever.refresh()
+    def rebuild_index(self, document_id: UUID) -> BuildIndexResponse:
+        document = self.session.get(DocumentRecord, document_id)
+        if document is None:
+            raise FileNotFoundError("Document not found.")
+
+        document.status = "processing"
+        document.error_message = None
+        self.session.add(document)
+        self.session.commit()
+
+        result = build_index(self.settings, self.session, document)
         return BuildIndexResponse(
-            message="Vector index rebuilt successfully.",
+            message="Document index rebuilt successfully.",
+            document_id=result.document_id,
             page_count=result.page_count,
             chunk_count=result.chunk_count,
-            vectorstore_dir=str(self.settings.vectorstore_dir),
-            chunk_cache_path=str(self.settings.chunk_cache_path),
         )
 
     def system_status(self) -> SystemStatus:
+        document_count = self.session.scalar(select(func.count()).select_from(DocumentRecord)) or 0
+        ready_document_count = (
+            self.session.scalar(
+                select(func.count()).select_from(DocumentRecord).where(DocumentRecord.status == "ready")
+            )
+            or 0
+        )
         return SystemStatus(
             status="ok",
             api_name=self.settings.app_name,
-            pdf_exists=self.settings.pdf_path.exists(),
-            index_ready=self.retriever.is_ready(),
+            document_count=document_count,
+            ready_document_count=ready_document_count,
             chat_model=self.settings.chat_model,
             embedding_model=self.settings.embedding_model,
         )
@@ -165,6 +178,7 @@ class RAGService:
         citations = [
             Citation(
                 chunk_id=chunk.chunk_id,
+                source=chunk.source,
                 page=chunk.page_number,
                 score=chunk.score,
                 excerpt=trim_excerpt(chunk.content),
@@ -182,14 +196,28 @@ class RAGService:
         )
 
     def answer_question(self, payload: ChatRequest) -> ChatResponse:
-        if not self.retriever.is_ready():
-            if self.settings.allow_index_auto_build:
-                self.rebuild_index()
-            else:
-                raise RuntimeError("The vector index is missing. Rebuild it before querying.")
+        if payload.document_id is not None:
+            document = self.session.get(DocumentRecord, payload.document_id)
+            if document is None:
+                raise RuntimeError("The selected document does not exist.")
+            if document.status != "ready":
+                raise RuntimeError("The selected document is not ready yet.")
+        else:
+            ready_document_count = (
+                self.session.scalar(
+                    select(func.count()).select_from(DocumentRecord).where(DocumentRecord.status == "ready")
+                )
+                or 0
+            )
+            if ready_document_count == 0:
+                raise RuntimeError("There are no ready documents to search yet.")
 
         top_k = min(payload.top_k, self.settings.max_context_chunks)
-        retrieved_chunks = self.retriever.retrieve(payload.query, top_k=top_k)
+        retrieved_chunks = self.retriever.retrieve(
+            query=payload.query,
+            top_k=top_k,
+            document_id=payload.document_id,
+        )
 
         if not retrieved_chunks:
             return self._abstain("No relevant chunks were retrieved.", [])

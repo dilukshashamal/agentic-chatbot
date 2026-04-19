@@ -1,11 +1,12 @@
-import json
 from dataclasses import dataclass
+from uuid import UUID
 
-from langchain_community.vectorstores import FAISS
-from rank_bm25 import BM25Okapi
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.services.documents import RetrievedChunk, tokenize
+from app.db.models import DocumentChunkRecord, DocumentRecord
+from app.services.documents import RetrievedChunk, text_quality_score, tokenize
 from app.services.indexing import _get_embeddings
 
 
@@ -20,33 +21,10 @@ class _Candidate:
     overlap_score: float = 0.0
 
 
-class HybridRetriever:
-    def __init__(self, settings: Settings) -> None:
+class PgVectorRetriever:
+    def __init__(self, settings: Settings, session: Session) -> None:
         self.settings = settings
-        self._vectorstore: FAISS | None = None
-        self._chunk_records: list[dict] = []
-        self._tokenized_chunks: list[list[str]] = []
-        self._bm25: BM25Okapi | None = None
-
-    def is_ready(self) -> bool:
-        return self.settings.vectorstore_dir.exists() and self.settings.chunk_cache_path.exists()
-
-    def refresh(self) -> None:
-        if not self.is_ready():
-            raise FileNotFoundError("The vector index is not ready yet. Build the index first.")
-
-        self._vectorstore = FAISS.load_local(
-            str(self.settings.vectorstore_dir),
-            _get_embeddings(self.settings),
-            allow_dangerous_deserialization=True,
-        )
-        self._chunk_records = json.loads(self.settings.chunk_cache_path.read_text(encoding="utf-8"))
-        self._tokenized_chunks = [tokenize(record["content"]) for record in self._chunk_records]
-        self._bm25 = BM25Okapi(self._tokenized_chunks)
-
-    def _ensure_ready(self) -> None:
-        if self._vectorstore is None or self._bm25 is None:
-            self.refresh()
+        self.session = session
 
     @staticmethod
     def _keyword_overlap(query_tokens: list[str], doc_tokens: list[str]) -> float:
@@ -57,87 +35,46 @@ class HybridRetriever:
         doc_set = set(doc_tokens)
         return len(query_set & doc_set) / max(len(query_set), 1)
 
-    def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
-        self._ensure_ready()
-        assert self._vectorstore is not None
-        assert self._bm25 is not None
+    @staticmethod
+    def _chunk_id(document_id: UUID, chunk_index: int) -> str:
+        return f"doc-{str(document_id)[:8]}-chunk-{chunk_index:04d}"
 
+    def retrieve(self, query: str, top_k: int, document_id: UUID | None = None) -> list[RetrievedChunk]:
         query_tokens = tokenize(query)
-        candidates: dict[str, _Candidate] = {}
+        query_embedding = _get_embeddings(self.settings).embed_query(query)
+        distance = DocumentChunkRecord.embedding.cosine_distance(query_embedding)
 
-        vector_results = self._vectorstore.similarity_search_with_score(
-            query,
-            k=self.settings.retriever_fetch_k,
+        statement = (
+            select(DocumentChunkRecord, DocumentRecord.file_name, distance.label("distance"))
+            .join(DocumentRecord, DocumentRecord.id == DocumentChunkRecord.document_id)
+            .where(DocumentRecord.status == "ready")
+            .order_by(distance.asc())
+            .limit(self.settings.retriever_fetch_k)
         )
+        if document_id is not None:
+            statement = statement.where(DocumentChunkRecord.document_id == document_id)
 
-        for document, distance in vector_results:
-            chunk_id = document.metadata.get("chunk_id")
-            if not chunk_id:
-                continue
-
-            existing = candidates.get(chunk_id)
-            if existing is None:
-                existing = _Candidate(
-                    chunk_id=chunk_id,
-                    content=document.page_content,
-                    page_number=document.metadata.get("page_number"),
-                    source=document.metadata.get("source", self.settings.pdf_path.name),
-                )
-                candidates[chunk_id] = existing
-
-            existing.vector_score = max(existing.vector_score, 1.0 / (1.0 + max(float(distance), 0.0)))
-            existing.overlap_score = max(
-                existing.overlap_score,
-                self._keyword_overlap(query_tokens, tokenize(document.page_content)),
-            )
-
-        bm25_scores = self._bm25.get_scores(query_tokens)
-        max_bm25 = max(bm25_scores) if len(bm25_scores) else 0.0
-        ranked_indices = sorted(
-            range(len(self._chunk_records)),
-            key=lambda index: bm25_scores[index],
-            reverse=True,
-        )[: self.settings.retriever_fetch_k]
-
-        for index in ranked_indices:
-            record = self._chunk_records[index]
-            chunk_id = record["chunk_id"]
-            existing = candidates.get(chunk_id)
-            if existing is None:
-                existing = _Candidate(
-                    chunk_id=chunk_id,
-                    content=record["content"],
-                    page_number=record.get("page_number"),
-                    source=record.get("source", self.settings.pdf_path.name),
-                )
-                candidates[chunk_id] = existing
-
-            existing.bm25_score = max(
-                existing.bm25_score,
-                float(bm25_scores[index]) / max_bm25 if max_bm25 > 0 else 0.0,
-            )
-            existing.overlap_score = max(
-                existing.overlap_score,
-                self._keyword_overlap(query_tokens, self._tokenized_chunks[index]),
-            )
+        rows = self.session.execute(statement).all()
 
         retrieved: list[RetrievedChunk] = []
-        for candidate in candidates.values():
+        for chunk, document_name, raw_distance in rows:
+            vector_score = max(0.0, min(1.0, 1.0 - max(float(raw_distance), 0.0)))
+            overlap_score = self._keyword_overlap(query_tokens, tokenize(chunk.content))
+            quality_score = max(text_quality_score(chunk.content), 0.2)
             combined_score = (
-                self.settings.vector_weight * candidate.vector_score
-                + self.settings.bm25_weight * candidate.bm25_score
-                + self.settings.overlap_weight * candidate.overlap_score
-            )
+                self.settings.vector_weight * vector_score
+                + self.settings.overlap_weight * overlap_score
+            ) * quality_score
             retrieved.append(
                 RetrievedChunk(
-                    chunk_id=candidate.chunk_id,
-                    content=candidate.content,
-                    page_number=candidate.page_number,
-                    source=candidate.source,
+                    chunk_id=self._chunk_id(chunk.document_id, chunk.chunk_index),
+                    content=chunk.content,
+                    page_number=chunk.page_number,
+                    source=document_name,
                     score=round(min(combined_score, 1.0), 4),
-                    vector_score=round(min(candidate.vector_score, 1.0), 4),
-                    bm25_score=round(min(candidate.bm25_score, 1.0), 4),
-                    overlap_score=round(min(candidate.overlap_score, 1.0), 4),
+                    vector_score=round(vector_score, 4),
+                    bm25_score=0.0,
+                    overlap_score=round(min(overlap_score, 1.0), 4),
                 )
             )
 

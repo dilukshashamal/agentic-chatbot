@@ -10,17 +10,20 @@ PROJECT_ROOT = BACKEND_ROOT.parent
 
 
 class Settings(BaseSettings):
-    app_name: str = "Mathematics RAG API"
+    app_name: str = "Document RAG API"
     api_prefix: str = "/api/v1"
     environment: Literal["development", "production", "test"] = "development"
 
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
+    database_url: str = Field(
+        default="postgresql+psycopg://postgres:postgres@localhost:5432/rag_chatbot",
+        alias="DATABASE_URL",
+    )
 
-    pdf_path: Path = PROJECT_ROOT / "pdfs" / "mathematics.pdf"
-    vectorstore_dir: Path = PROJECT_ROOT / "vectorstores" / "mathematics_faiss_gemini"
-    chunk_cache_path: Path = BACKEND_ROOT / "data" / "chunks.json"
+    upload_dir: Path = BACKEND_ROOT / "data" / "uploads"
 
     embedding_model: str = "models/gemini-embedding-001"
+    embedding_dimensions: int = Field(default=3072, ge=128, le=8192)
     chat_model: str = "gemini-2.5-flash"
 
     chunk_size: int = Field(default=1000, ge=300, le=2000)
@@ -36,7 +39,6 @@ class Settings(BaseSettings):
     min_retrieval_score: float = Field(default=0.18, ge=0.0, le=1.0)
 
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
-    allow_index_auto_build: bool = True
 
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]

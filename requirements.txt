@@ -1,3 +1,5 @@
+-r backend/requirements.txt
+
 requests
 beautifulsoup4
 langchain
@@ -5,9 +7,7 @@ langchain-text-splitters
 langchain-community
 langchain-google-genai
 unstructured
-faiss-cpu
 sentence-transformers
-rank_bm25
 tiktoken
 streamlit
 transformers

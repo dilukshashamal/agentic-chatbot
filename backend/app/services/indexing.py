@@ -1,18 +1,22 @@
-import json
 from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID
 
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import FAISS
-from langchain_core.documents import Document
+from langchain_core.documents import Document as LCDocument
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.services.documents import normalize_text
+from app.db.models import DocumentChunkRecord, DocumentRecord
+from app.services.documents import normalize_text, text_quality_score
 
 
 @dataclass(frozen=True)
 class BuildIndexResult:
+    document_id: UUID
     page_count: int
     chunk_count: int
 
@@ -27,14 +31,15 @@ def _get_embeddings(settings: Settings) -> GoogleGenerativeAIEmbeddings:
     )
 
 
-def load_pdf_documents(settings: Settings) -> list[Document]:
-    if not settings.pdf_path.exists():
-        raise FileNotFoundError(f"PDF not found: {settings.pdf_path}")
+def load_pdf_documents(document: DocumentRecord) -> list[LCDocument]:
+    pdf_path = document.storage_path
+    if not pdf_path:
+        raise FileNotFoundError("Document has no stored PDF path.")
 
-    loader = PyPDFLoader(str(settings.pdf_path))
+    loader = PyPDFLoader(pdf_path)
     documents = loader.load()
 
-    cleaned_documents: list[Document] = []
+    cleaned_documents: list[LCDocument] = []
     for document in documents:
         cleaned = normalize_text(document.page_content)
         if not cleaned:
@@ -43,11 +48,11 @@ def load_pdf_documents(settings: Settings) -> list[Document]:
         page = document.metadata.get("page")
         page_number = page + 1 if isinstance(page, int) else None
         cleaned_documents.append(
-            Document(
+            LCDocument(
                 page_content=cleaned,
                 metadata={
                     **document.metadata,
-                    "source": settings.pdf_path.name,
+                    "source": Path(pdf_path).name,
                     "page_number": page_number,
                 },
             )
@@ -56,19 +61,23 @@ def load_pdf_documents(settings: Settings) -> list[Document]:
     return cleaned_documents
 
 
-def split_documents(settings: Settings, documents: list[Document]) -> list[Document]:
+def split_documents(settings: Settings, documents: list[LCDocument]) -> list[LCDocument]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
     )
 
     chunks = splitter.split_documents(documents)
-    enriched_chunks: list[Document] = []
+    enriched_chunks: list[LCDocument] = []
 
     for index, chunk in enumerate(chunks, start=1):
+        cleaned_content = normalize_text(chunk.page_content)
+        if text_quality_score(cleaned_content) < 0.18:
+            continue
+
         enriched_chunks.append(
-            Document(
-                page_content=normalize_text(chunk.page_content),
+            LCDocument(
+                page_content=cleaned_content,
                 metadata={
                     **chunk.metadata,
                     "chunk_id": f"chunk-{index:04d}",
@@ -79,31 +88,36 @@ def split_documents(settings: Settings, documents: list[Document]) -> list[Docum
     return enriched_chunks
 
 
-def _write_chunk_cache(settings: Settings, chunks: list[Document]) -> None:
-    records = [
-        {
-            "chunk_id": chunk.metadata.get("chunk_id"),
-            "page_number": chunk.metadata.get("page_number"),
-            "source": chunk.metadata.get("source", settings.pdf_path.name),
-            "content": chunk.page_content,
-        }
-        for chunk in chunks
-    ]
-
-    settings.chunk_cache_path.parent.mkdir(parents=True, exist_ok=True)
-    settings.chunk_cache_path.write_text(
-        json.dumps(records, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
-def build_index(settings: Settings) -> BuildIndexResult:
-    documents = load_pdf_documents(settings)
+def build_index(settings: Settings, session: Session, document: DocumentRecord) -> BuildIndexResult:
+    documents = load_pdf_documents(document)
     chunks = split_documents(settings, documents)
+    if not chunks:
+        raise RuntimeError("The uploaded PDF did not produce any indexable text chunks.")
 
-    vectorstore = FAISS.from_documents(chunks, _get_embeddings(settings))
-    settings.vectorstore_dir.mkdir(parents=True, exist_ok=True)
-    vectorstore.save_local(str(settings.vectorstore_dir))
-    _write_chunk_cache(settings, chunks)
+    embeddings = _get_embeddings(settings).embed_documents([chunk.page_content for chunk in chunks])
 
-    return BuildIndexResult(page_count=len(documents), chunk_count=len(chunks))
+    session.execute(delete(DocumentChunkRecord).where(DocumentChunkRecord.document_id == document.id))
+
+    for index, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True), start=1):
+        session.add(
+            DocumentChunkRecord(
+                document_id=document.id,
+                chunk_index=index,
+                page_number=chunk.metadata.get("page_number"),
+                content=chunk.page_content,
+                embedding=embedding,
+            )
+        )
+
+    document.status = "ready"
+    document.error_message = None
+    document.page_count = len(documents)
+    document.chunk_count = len(chunks)
+    session.add(document)
+    session.commit()
+
+    return BuildIndexResult(
+        document_id=document.id,
+        page_count=len(documents),
+        chunk_count=len(chunks),
+    )

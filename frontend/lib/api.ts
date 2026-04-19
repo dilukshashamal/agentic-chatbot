@@ -1,8 +1,20 @@
 export type Citation = {
   chunk_id: string;
+  source: string;
   page: number | null;
   score: number;
   excerpt: string;
+};
+
+export type DocumentSummary = {
+  id: string;
+  file_name: string;
+  status: "uploaded" | "processing" | "ready" | "failed";
+  page_count: number | null;
+  chunk_count: number | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ChatResponse = {
@@ -18,8 +30,8 @@ export type ChatResponse = {
 export type SystemStatus = {
   status: "ok";
   api_name: string;
-  pdf_exists: boolean;
-  index_ready: boolean;
+  document_count: number;
+  ready_document_count: number;
   chat_model: string;
   embedding_model: string;
 };
@@ -44,6 +56,26 @@ export async function fetchStatus(): Promise<SystemStatus> {
   return handleResponse<SystemStatus>(response);
 }
 
+export async function fetchDocuments(): Promise<DocumentSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
+    cache: "no-store",
+  });
+
+  return handleResponse<DocumentSummary[]>(response);
+}
+
+export async function uploadDocument(file: File): Promise<{ message: string; document: DocumentSummary }> {
+  const body = new FormData();
+  body.append("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, {
+    method: "POST",
+    body,
+  });
+
+  return handleResponse<{ message: string; document: DocumentSummary }>(response);
+}
+
 export async function askQuestion(query: string): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/api/v1/chat/query`, {
     method: "POST",
@@ -60,8 +92,8 @@ export async function askQuestion(query: string): Promise<ChatResponse> {
   return handleResponse<ChatResponse>(response);
 }
 
-export async function rebuildIndex(): Promise<{ message: string; chunk_count: number }> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/ingest/rebuild`, {
+export async function rebuildIndex(documentId: string): Promise<{ message: string; chunk_count: number }> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/reindex`, {
     method: "POST",
   });
 

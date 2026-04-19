@@ -2,10 +2,12 @@ fastapi
 uvicorn[standard]
 pydantic-settings
 python-dotenv
+python-multipart
+sqlalchemy
+psycopg[binary]
+pgvector
 langchain
 langchain-community
 langchain-text-splitters
 langchain-google-genai
-faiss-cpu
-rank_bm25
 pypdf
