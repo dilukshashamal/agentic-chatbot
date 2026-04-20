@@ -78,6 +78,11 @@ class SystemStatus(BaseModel):
     orchestration_enabled: bool = True
     conversation_count: int = Field(default=0, ge=0)
     memory_provider: str = "local"
+    pipeline_version: str = "1.0.0"
+    retrieval_config_version: str = "1.0.0"
+    prompt_template_version: str = "1.0.0"
+    model_registry_provider: str = "local"
+    shadow_mode_enabled: bool = False
 
 
 class DocumentSummary(BaseModel):
@@ -152,6 +157,119 @@ class ConversationDetail(BaseModel):
     created_at: datetime
     updated_at: datetime
     turns: list[ConversationTurnSummary] = Field(default_factory=list)
+
+
+class ModelRegistryEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    model_kind: str
+    provider: str
+    model_name: str
+    semantic_version: str
+    external_version: str | None = None
+    stage: str
+    is_active: bool
+    is_shadow: bool
+    checkpoint_uri: str | None = None
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class RetrievalConfigVersion(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    semantic_version: str
+    is_active: bool
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class PromptTemplateVersion(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    template_type: str
+    semantic_version: str
+    template_text: str | None = None
+    is_active: bool
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class FeatureFlagSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    enabled: bool
+    rollout_percent: int
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExperimentRunSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    conversation_id: UUID | None = None
+    experiment_type: str
+    experiment_name: str
+    pipeline_version: str
+    assignment_bucket: str | None = None
+    query_type: str | None = None
+    status: str
+    latency_ms: float | None = None
+    prompt_template_version: str | None = None
+    retrieval_config_version: str | None = None
+    chat_model_version: str | None = None
+    embedding_model_version: str | None = None
+    parameters_json: dict[str, Any] = Field(default_factory=dict)
+    metrics_json: dict[str, Any] = Field(default_factory=dict)
+    costs_json: dict[str, Any] = Field(default_factory=dict)
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ShadowEvaluationSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    experiment_run_id: UUID | None = None
+    conversation_id: UUID | None = None
+    candidate_chat_model: str | None = None
+    candidate_embedding_model: str | None = None
+    candidate_retrieval_config_version: str | None = None
+    candidate_prompt_template_version: str | None = None
+    assignment_bucket: str | None = None
+    status: str
+    latency_ms: float | None = None
+    metrics_json: dict[str, Any] = Field(default_factory=dict)
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ModelManagementStatus(BaseModel):
+    pipeline_version: str
+    registry_provider: str
+    active_chat_model: str
+    active_embedding_model: str
+    retrieval_config_version: str
+    prompt_template_version: str
+    ab_test_enabled: bool
+    ab_test_rollout_percent: int
+    shadow_mode_enabled: bool
+    shadow_sampling_percent: int
+    feature_flags: list[FeatureFlagSummary] = Field(default_factory=list)
+    registry_entries: list[ModelRegistryEntry] = Field(default_factory=list)
 
 
 ChatResponse.model_rebuild()

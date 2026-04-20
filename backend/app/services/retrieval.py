@@ -39,9 +39,18 @@ class PgVectorRetriever:
     def _chunk_id(document_id: UUID, chunk_index: int) -> str:
         return f"doc-{str(document_id)[:8]}-chunk-{chunk_index:04d}"
 
-    def retrieve(self, query: str, top_k: int, document_id: UUID | None = None) -> list[RetrievedChunk]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int,
+        document_id: UUID | None = None,
+        *,
+        embedding_model: str | None = None,
+        retrieval_overrides: dict[str, float | int] | None = None,
+    ) -> list[RetrievedChunk]:
+        overrides = retrieval_overrides or {}
         query_tokens = tokenize(query)
-        query_embedding = _get_embeddings(self.settings).embed_query(query)
+        query_embedding = _get_embeddings(self.settings, model_name=embedding_model).embed_query(query)
         distance = DocumentChunkRecord.embedding.cosine_distance(query_embedding)
 
         statement = (
@@ -49,7 +58,7 @@ class PgVectorRetriever:
             .join(DocumentRecord, DocumentRecord.id == DocumentChunkRecord.document_id)
             .where(DocumentRecord.status == "ready")
             .order_by(distance.asc())
-            .limit(self.settings.retriever_fetch_k)
+            .limit(int(overrides.get("retriever_fetch_k", self.settings.retriever_fetch_k)))
         )
         if document_id is not None:
             statement = statement.where(DocumentChunkRecord.document_id == document_id)
@@ -62,8 +71,8 @@ class PgVectorRetriever:
             overlap_score = self._keyword_overlap(query_tokens, tokenize(chunk.content))
             quality_score = max(text_quality_score(chunk.content), 0.2)
             combined_score = (
-                self.settings.vector_weight * vector_score
-                + self.settings.overlap_weight * overlap_score
+                float(overrides.get("vector_weight", self.settings.vector_weight)) * vector_score
+                + float(overrides.get("overlap_weight", self.settings.overlap_weight)) * overlap_score
             ) * quality_score
             retrieved.append(
                 RetrievedChunk(

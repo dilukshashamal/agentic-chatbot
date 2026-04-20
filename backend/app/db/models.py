@@ -298,3 +298,157 @@ class DocumentAccessRecord(Base):
     )
 
     conversation: Mapped[ConversationRecord] = relationship(back_populates="document_accesses")
+
+
+class ModelRegistryRecord(Base):
+    __tablename__ = "model_registry"
+    __table_args__ = (UniqueConstraint("model_kind", "semantic_version", name="uq_model_registry_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    model_kind: Mapped[str] = mapped_column(String(32), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="local")
+    model_name: Mapped[str] = mapped_column(String(255))
+    semantic_version: Mapped[str] = mapped_column(String(32), index=True)
+    external_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    stage: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_shadow: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    checkpoint_uri: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class RetrievalConfigRecord(Base):
+    __tablename__ = "retrieval_configs"
+    __table_args__ = (UniqueConstraint("name", "semantic_version", name="uq_retrieval_config_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), default="default")
+    semantic_version: Mapped[str] = mapped_column(String(32), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class PromptTemplateRecord(Base):
+    __tablename__ = "prompt_templates"
+    __table_args__ = (UniqueConstraint("name", "semantic_version", name="uq_prompt_template_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), default="default")
+    template_type: Mapped[str] = mapped_column(String(64), default="chat")
+    semantic_version: Mapped[str] = mapped_column(String(32), index=True)
+    template_text: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class FeatureFlagRecord(Base):
+    __tablename__ = "feature_flags"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    rollout_percent: Mapped[int] = mapped_column(Integer, default=100)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ExperimentRunRecord(Base):
+    __tablename__ = "experiment_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    experiment_type: Mapped[str] = mapped_column(String(64), index=True)
+    experiment_name: Mapped[str] = mapped_column(String(255), index=True)
+    pipeline_version: Mapped[str] = mapped_column(String(32), index=True)
+    assignment_bucket: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    query_type: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prompt_template_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    retrieval_config_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    chat_model_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    embedding_model_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    parameters_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    metrics_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    costs_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ShadowEvaluationRecord(Base):
+    __tablename__ = "shadow_evaluations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    experiment_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("experiment_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    candidate_chat_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    candidate_embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    candidate_retrieval_config_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    candidate_prompt_template_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    assignment_bucket: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="logged", index=True)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metrics_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

@@ -12,6 +12,7 @@ from app.db.models import ConversationRecord, DocumentRecord
 from app.models.schemas import BuildIndexResponse, ChatRequest, ChatResponse, Citation, LLMAnswer, SystemStatus
 from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.indexing import build_index
+from app.services.model_management import ModelManagementService
 from app.services.retrieval import PgVectorRetriever
 
 
@@ -20,6 +21,7 @@ class RAGService:
         self.settings = settings
         self.session = session
         self.retriever = PgVectorRetriever(settings, session)
+        self.model_management = ModelManagementService(settings, session)
         self._llm: ChatGoogleGenerativeAI | None = None
         self._prompt = ChatPromptTemplate.from_messages(
             [
@@ -165,11 +167,16 @@ class RAGService:
             api_name=self.settings.app_name,
             document_count=document_count,
             ready_document_count=ready_document_count,
-            chat_model=self.settings.chat_model,
-            embedding_model=self.settings.embedding_model,
+            chat_model=self.model_management.active_model_name("chat", self.settings.chat_model),
+            embedding_model=self.model_management.active_model_name("embedding", self.settings.embedding_model),
             orchestration_enabled=True,
             conversation_count=self.session.scalar(select(func.count()).select_from(ConversationRecord)) or 0,
             memory_provider=self.settings.memory_provider,
+            pipeline_version=self.settings.pipeline_version,
+            retrieval_config_version=self.model_management.active_retrieval_config_version(),
+            prompt_template_version=self.model_management.active_prompt_template_version(),
+            model_registry_provider=self.settings.model_registry_provider,
+            shadow_mode_enabled=self.settings.shadow_mode_enabled,
         )
 
     def _abstain(

@@ -65,6 +65,41 @@ class Settings(BaseSettings):
     zep_api_key: str | None = Field(default=None, alias="ZEP_API_KEY")
     zep_base_url: str | None = Field(default=None, alias="ZEP_BASE_URL")
 
+    pipeline_version: str = "1.0.0"
+    chunking_strategy_version: str = "1.0.0"
+    retrieval_config_version: str = "1.0.0"
+    prompt_template_version: str = "1.0.0"
+
+    model_registry_provider: Literal["local", "mlflow", "wandb"] = "local"
+    mlflow_tracking_uri: str | None = Field(default=None, alias="MLFLOW_TRACKING_URI")
+    mlflow_registry_uri: str | None = Field(default=None, alias="MLFLOW_REGISTRY_URI")
+    mlflow_experiment_name: str = "rag-chatbot"
+    mlflow_registry_prefix: str = "rag"
+    wandb_project: str | None = Field(default=None, alias="WANDB_PROJECT")
+    wandb_entity: str | None = Field(default=None, alias="WANDB_ENTITY")
+    wandb_api_key: str | None = Field(default=None, alias="WANDB_API_KEY")
+
+    model_ab_test_enabled: bool = False
+    model_ab_test_rollout_percent: int = Field(default=10, ge=0, le=100)
+    experimental_chat_model: str | None = None
+    experimental_embedding_model: str | None = None
+    experimental_retrieval_config_version: str | None = None
+    experimental_prompt_template_version: str | None = None
+
+    shadow_mode_enabled: bool = False
+    shadow_sampling_percent: int = Field(default=10, ge=0, le=100)
+    shadow_chat_model: str | None = None
+    shadow_embedding_model: str | None = None
+    shadow_retrieval_config_version: str | None = None
+    shadow_prompt_template_version: str | None = None
+
+    estimated_input_token_cost_per_1k: float = Field(default=0.0003, ge=0.0)
+    estimated_output_token_cost_per_1k: float = Field(default=0.0006, ge=0.0)
+    estimated_embedding_cost_per_1k: float = Field(default=0.0001, ge=0.0)
+
+    metrics_enabled: bool = True
+    metrics_namespace: str = "rag"
+
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )

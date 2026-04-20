@@ -21,6 +21,8 @@ from app.services.conversations import ConversationService
 from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.exports import ExportService
 from app.services.memory import MemoryService
+from app.services.metrics import observe_query
+from app.services.model_management import ModelManagementService, RuntimeModelProfile
 from app.services.retrieval import PgVectorRetriever
 
 try:  # pragma: no cover - optional dependency
@@ -68,6 +70,8 @@ class AgentState(TypedDict, total=False):
     memory_actions: list[dict[str, Any]]
     knowledge_graph_topics: list[str]
     custom_instructions: str
+    runtime_profile: dict[str, Any]
+    experiment_run_id: str | None
     route: str
     route_reason: str
     reasoning_mode: str
@@ -95,20 +99,22 @@ class MultiAgentOrchestrator:
         self.conversations = ConversationService(session)
         self.exports = ExportService(settings)
         self.memory = MemoryService(settings, session)
-        self._llm: ChatGoogleGenerativeAI | None = None
+        self.model_management = ModelManagementService(settings, session)
+        self._llm_cache: dict[str, ChatGoogleGenerativeAI] = {}
         self._graph = None
         self._checkpointer = MemorySaver() if LANGGRAPH_AVAILABLE and MemorySaver is not None else None
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
-        if self._llm is None:
+    def _get_llm(self, model_name: str | None = None) -> ChatGoogleGenerativeAI:
+        chosen_model = model_name or self.settings.orchestration_model
+        if chosen_model not in self._llm_cache:
             if not self.settings.google_api_key:
                 raise RuntimeError("GOOGLE_API_KEY is required to query Gemini.")
-            self._llm = ChatGoogleGenerativeAI(
-                model=self.settings.orchestration_model,
+            self._llm_cache[chosen_model] = ChatGoogleGenerativeAI(
+                model=chosen_model,
                 temperature=self.settings.temperature,
                 google_api_key=self.settings.google_api_key,
             )
-        return self._llm
+        return self._llm_cache[chosen_model]
 
     @staticmethod
     def _extract_message_text(content: Any) -> str:
@@ -139,6 +145,28 @@ class MultiAgentOrchestrator:
 
     def _invoke_json(self, system_prompt: str, human_prompt: str) -> dict[str, Any]:
         raw = self._get_llm().invoke(
+            [
+                ("system", system_prompt),
+                ("human", human_prompt),
+            ]
+        )
+        return json.loads(self._cleanup_json(self._extract_message_text(raw.content)))
+
+    def _runtime_profile_from_state(self, state: AgentState) -> RuntimeModelProfile:
+        data = state.get("runtime_profile", {})
+        return RuntimeModelProfile(
+            chat_model=str(data.get("chat_model", self.settings.chat_model)),
+            embedding_model=str(data.get("embedding_model", self.settings.embedding_model)),
+            retrieval_config_version=str(data.get("retrieval_config_version", self.settings.retrieval_config_version)),
+            prompt_template_version=str(data.get("prompt_template_version", self.settings.prompt_template_version)),
+            assignment_bucket=str(data.get("assignment_bucket", "control")),
+            shadow_enabled=bool(data.get("shadow_enabled", False)),
+            shadow_profile=dict(data.get("shadow_profile", {})),
+        )
+
+    def _invoke_json_with_state(self, state: AgentState, system_prompt: str, human_prompt: str) -> dict[str, Any]:
+        runtime_profile = self._runtime_profile_from_state(state)
+        raw = self._get_llm(runtime_profile.chat_model).invoke(
             [
                 ("system", system_prompt),
                 ("human", human_prompt),
@@ -423,7 +451,7 @@ class MultiAgentOrchestrator:
             "Focus on grounded document answers first, then add analysis or tools only if justified."
         )
         try:
-            routed = self._invoke_json(system_prompt, human_prompt)
+            routed = self._invoke_json_with_state(state, system_prompt, human_prompt)
         except Exception:
             routed = self._heuristic_route(state["question"])
 
@@ -442,10 +470,12 @@ class MultiAgentOrchestrator:
     def _document_agent(self, state: AgentState) -> AgentState:
         top_k = min(state.get("top_k", 4), self.settings.max_context_chunks)
         document_id = UUID(state["document_id"]) if state.get("document_id") else None
+        runtime_profile = self._runtime_profile_from_state(state)
         retrieved_chunks = self.retriever.retrieve(
             query=state["question"],
             top_k=top_k,
             document_id=document_id,
+            embedding_model=runtime_profile.embedding_model,
         )
         state["retrieved_chunks"] = retrieved_chunks
         self._pop_agent(state, "document")
@@ -472,7 +502,7 @@ class MultiAgentOrchestrator:
             f"Retrieved context:\n{self._build_context(retrieved_chunks)}"
         )
         try:
-            result = self._invoke_json(system_prompt, human_prompt)
+            result = self._invoke_json_with_state(state, system_prompt, human_prompt)
         except Exception:
             result = {
                 "summary": trim_excerpt(retrieved_chunks[0].content, 400),
@@ -507,7 +537,7 @@ class MultiAgentOrchestrator:
             f"Retrieved context:\n{self._build_context(chunks)}"
         )
         try:
-            state["analytical_result"] = self._invoke_json(system_prompt, human_prompt)
+            state["analytical_result"] = self._invoke_json_with_state(state, system_prompt, human_prompt)
         except Exception:
             grouped_sources = sorted({chunk.source for chunk in chunks})
             state["analytical_result"] = {
@@ -637,7 +667,7 @@ class MultiAgentOrchestrator:
                 f"Retrieved document evidence: {json.dumps([{'chunk_id': c.chunk_id, 'source': c.source, 'score': c.score} for c in state.get('retrieved_chunks', [])[:4]])}"
             )
             try:
-                decision = self._invoke_json(system_prompt, human_prompt)
+                decision = self._invoke_json_with_state(state, system_prompt, human_prompt)
             except Exception:
                 lowered = state["question"].lower()
                 if any(token in lowered for token in ["latest", "today", "current", "recent"]):
@@ -739,7 +769,7 @@ class MultiAgentOrchestrator:
             f"Retrieved context:\n{self._build_context(chunks)}"
         )
         try:
-            citation_result = self._invoke_json(system_prompt, human_prompt)
+            citation_result = self._invoke_json_with_state(state, system_prompt, human_prompt)
         except Exception:
             citation_result = {
                 "grounded": chunks[0].score >= self.settings.min_retrieval_score,
@@ -771,7 +801,7 @@ class MultiAgentOrchestrator:
             f"Citation result: {json.dumps(state.get('citation_result', {}))}"
         )
         try:
-            final_result = self._invoke_json(system_prompt, human_prompt)
+            final_result = self._invoke_json_with_state(state, system_prompt, human_prompt)
         except Exception:
             grounded = bool(state.get("citation_result", {}).get("grounded", False) and citations)
             final_result = {
@@ -842,6 +872,82 @@ class MultiAgentOrchestrator:
             response=response,
             formats=formats,
         )
+
+    def _log_query_experiment(
+        self,
+        *,
+        response: ChatResponse,
+        payload: ChatRequest,
+        retrieved_chunks: list[RetrievedChunk],
+        runtime_profile: RuntimeModelProfile,
+        latency_ms: float,
+    ) -> None:
+        retrieval_metrics = self.model_management.retrieval_metrics(
+            retrieved_chunks=retrieved_chunks,
+            cited_chunk_ids={citation.chunk_id for citation in response.citations},
+            top_k=max(payload.top_k, 1),
+            grounding_threshold=self.settings.min_retrieval_score,
+        )
+        llm_metrics = self.model_management.llm_metrics(
+            grounded=response.grounded,
+            confidence=response.confidence,
+            latency_ms=latency_ms,
+        )
+        costs = self.model_management.estimate_query_cost(
+            query_text=payload.query,
+            answer_text=response.answer,
+            retrieved_chunks=len(retrieved_chunks),
+            query_type=response.route,
+        )
+        observe_query(
+            route=response.route,
+            bucket=runtime_profile.assignment_bucket,
+            answer_mode=response.answer_mode,
+            latency_seconds=max(latency_ms / 1000.0, 0.0),
+            cost_usd=costs.get("estimated_total_cost_usd", 0.0),
+            chat_model=runtime_profile.chat_model,
+        )
+        experiment = self.model_management.log_query_experiment(
+            conversation_id=response.conversation_id,
+            experiment_name=f"query-{response.route}",
+            query_type=response.route,
+            runtime_profile=runtime_profile,
+            parameters_json={
+                "top_k": payload.top_k,
+                "include_sources": payload.include_sources,
+                "document_id": str(payload.document_id) if payload.document_id else None,
+                "pipeline_version": self.settings.pipeline_version,
+            },
+            metrics_json={
+                **retrieval_metrics,
+                **llm_metrics,
+                "grounded": float(response.grounded),
+                "confidence": response.confidence,
+            },
+            costs_json=costs,
+            latency_ms=latency_ms,
+            metadata_json={
+                "route": response.route,
+                "answer_mode": response.answer_mode,
+                "retrieved_chunks": len(retrieved_chunks),
+            },
+        )
+        if runtime_profile.shadow_enabled:
+            self.model_management.log_shadow_evaluation(
+                experiment_run_id=experiment.id,
+                conversation_id=response.conversation_id,
+                runtime_profile=runtime_profile,
+                latency_ms=latency_ms,
+                metrics_json={
+                    "grounded": float(response.grounded),
+                    "confidence": response.confidence,
+                    "proxy_ndcg": retrieval_metrics.get("ndcg", 0.0),
+                },
+                metadata_json={
+                    "mode": "metadata_only",
+                    "note": "Shadow candidate was logged without affecting the user response.",
+                },
+            )
 
     def _build_graph(self):
         if not LANGGRAPH_AVAILABLE or StateGraph is None:
@@ -955,11 +1061,27 @@ class MultiAgentOrchestrator:
             }
         )
 
-    def _simple_retrieval_response(self, payload: ChatRequest, conversation_id: str, error_message: str) -> ChatResponse:
+    def _simple_retrieval_response(
+        self,
+        payload: ChatRequest,
+        conversation_id: str,
+        error_message: str,
+        runtime_profile: RuntimeModelProfile | None = None,
+    ) -> ChatResponse:
+        active_profile = runtime_profile or RuntimeModelProfile(
+            chat_model=self.settings.chat_model,
+            embedding_model=self.settings.embedding_model,
+            retrieval_config_version=self.settings.retrieval_config_version,
+            prompt_template_version=self.settings.prompt_template_version,
+            assignment_bucket="control",
+            shadow_enabled=False,
+            shadow_profile={},
+        )
         retrieved_chunks = self.retriever.retrieve(
             query=payload.query,
             top_k=min(payload.top_k, self.settings.max_context_chunks),
             document_id=payload.document_id,
+            embedding_model=active_profile.embedding_model,
         )
         citations = [
             Citation(
@@ -1013,10 +1135,20 @@ class MultiAgentOrchestrator:
         )
 
     def answer_question(self, payload: ChatRequest) -> ChatResponse:
+        started_at = time.perf_counter()
         conversation = self.conversations.get_or_create_conversation(payload.conversation_id, payload.user_preferences)
+        runtime_profile = self.model_management.runtime_profile(str(conversation.id))
         command_response = self._handle_memory_command(conversation, payload, {})
         if command_response is not None:
-            return self._persist_response(command_response, payload, [])
+            persisted = self._persist_response(command_response, payload, [])
+            self._log_query_experiment(
+                response=persisted,
+                payload=payload,
+                retrieved_chunks=[],
+                runtime_profile=runtime_profile,
+                latency_ms=(time.perf_counter() - started_at) * 1000.0,
+            )
+            return persisted
 
         self._validate_document_scope(payload)
         state: AgentState = {
@@ -1034,6 +1166,16 @@ class MultiAgentOrchestrator:
             "memory_actions": [],
             "knowledge_graph_topics": [],
             "custom_instructions": conversation.custom_instructions or "",
+            "runtime_profile": {
+                "chat_model": runtime_profile.chat_model,
+                "embedding_model": runtime_profile.embedding_model,
+                "retrieval_config_version": runtime_profile.retrieval_config_version,
+                "prompt_template_version": runtime_profile.prompt_template_version,
+                "assignment_bucket": runtime_profile.assignment_bucket,
+                "shadow_enabled": runtime_profile.shadow_enabled,
+                "shadow_profile": runtime_profile.shadow_profile,
+            },
+            "experiment_run_id": None,
             "pending_agents": [],
             "system_notes": [],
             "agent_trace": [],
@@ -1053,6 +1195,14 @@ class MultiAgentOrchestrator:
             response = final_state["response"]
             retrieved_chunks = final_state.get("retrieved_chunks", [])
         except Exception as exc:
-            response = self._simple_retrieval_response(payload, str(conversation.id), str(exc))
+            response = self._simple_retrieval_response(payload, str(conversation.id), str(exc), runtime_profile)
 
-        return self._persist_response(response, payload, retrieved_chunks)
+        persisted = self._persist_response(response, payload, retrieved_chunks)
+        self._log_query_experiment(
+            response=persisted,
+            payload=payload,
+            retrieved_chunks=retrieved_chunks,
+            runtime_profile=runtime_profile,
+            latency_ms=(time.perf_counter() - started_at) * 1000.0,
+        )
+        return persisted

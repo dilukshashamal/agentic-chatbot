@@ -1,6 +1,6 @@
 # Synkora AI RAG Chatbot
 
-Synkora AI is a multi-document RAG application for uploading PDFs, indexing them into `pgvector`, and chatting with grounded answers through a polished Next.js dashboard.
+Synkora AI is a multi-document RAG platform for uploading PDFs, indexing them into `pgvector`, and chatting with grounded answers through a polished Next.js dashboard. The current stack now includes multi-agent orchestration, multi-level memory, model management, and built-in observability with `MLflow`, `Prometheus`, and `Grafana`.
 
 ![Synkora dashboard](images/synkora_dash.png)
 
@@ -9,11 +9,31 @@ Synkora AI is a multi-document RAG application for uploading PDFs, indexing them
 - `FastAPI` backend with document upload, indexing, and chat APIs
 - `Next.js` frontend for document management and chat
 - `PostgreSQL + pgvector` for persistent vector search
+- `MLflow + Prometheus + Grafana` for experiment tracking and monitoring
 - background PDF indexing after upload
 - multi-agent orchestration layer for routing, memory, grounding, analysis, and tool use
 - conversation persistence with checkpoints for multi-turn workflows
 - multi-level memory with short-term, long-term, and knowledge-graph layers
+- model registry and experiment tracking for chat, embedding, retrieval, and prompt versions
 - source citations attached to grounded answers
+
+## Product Screens
+
+### Chat Workspace
+
+![Chat workspace](images/synkora_dash.png)
+
+### MLflow Tracking
+
+![MLflow tracking](images/mlflow.png)
+
+### Prometheus Monitoring
+
+![Prometheus monitoring](images/prometheus_dash.png)
+
+### Grafana Observability
+
+![Grafana observability](images/grafana_dash.png)
 
 ## Multi-Agent Flow
 
@@ -115,6 +135,34 @@ The current dashboard supports:
 - multi-file retrieval across ready documents
 - conversation continuity through backend conversation IDs
 
+## Infrastructure
+
+The local Docker stack now includes application services and an observability layer:
+
+- `frontend`: Next.js dashboard on port `3000`
+- `backend`: FastAPI RAG API on port `8000`
+- `db`: PostgreSQL with `pgvector` on port `5432`
+- `mlflow`: experiment tracking and registry metadata on port `5000`
+- `prometheus`: metrics scraping and target inspection on port `9090`
+- `grafana`: dashboarding and observability views on port `3001`
+
+Monitoring and model-management coverage now includes:
+
+- experiment logging for retrieval and generation runs
+- model registry metadata for chat and embedding versions
+- pipeline, prompt, and retrieval configuration version tracking
+- Prometheus metrics for HTTP traffic, query latency, cost, indexing, shadow evaluations, and provider publishing
+- a provisioned Grafana datasource and starter observability dashboard
+
+## Architecture Overview
+
+```text
+User -> Frontend -> Backend API -> Router / Memory / Document / Analysis / Citation / Tool agents
+                                   -> Retrieval + pgvector / Postgres
+                                   -> Model management + experiment logging
+                                   -> Metrics / MLflow / Prometheus / Grafana
+```
+
 ## Docker Setup
 
 ### 1. Create the root `.env`
@@ -142,6 +190,17 @@ Services:
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 - Postgres: `localhost:5432`
+- MLflow: `http://localhost:5000`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001`
+
+The compose stack now brings up the app and observability layer together:
+
+- `mlflow` for experiment tracking and registry metadata
+- `prometheus` for scraping backend metrics
+- `grafana` with a provisioned Prometheus datasource and starter dashboard
+
+The backend also runs additive compatibility migrations at startup for evolving local schemas, so older Postgres volumes can usually be patched forward without being deleted.
 
 If you recently pulled changes that added new tables or dependencies, rebuild the backend image so startup creates the new schema:
 
@@ -149,7 +208,42 @@ If you recently pulled changes that added new tables or dependencies, rebuild th
 docker compose up --build backend
 ```
 
-### 3. Live updates while developing
+### 3. Monitoring Defaults
+
+Optional additions to the root `.env`:
+
+```env
+MODEL_REGISTRY_PROVIDER=mlflow
+MLFLOW_TRACKING_URI=http://mlflow:5000
+MLFLOW_REGISTRY_URI=http://mlflow:5000
+MLFLOW_EXPERIMENT_NAME=rag-chatbot
+METRICS_ENABLED=true
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=admin
+```
+
+Monitoring endpoints after startup:
+
+- Grafana: `http://localhost:3001`
+- Prometheus: `http://localhost:9090`
+- Prometheus targets: `http://localhost:9090/targets`
+- MLflow UI: `http://localhost:5000`
+- Backend metrics: `http://localhost:8000/metrics`
+
+Default Grafana login:
+
+- username: `admin`
+- password: `admin`
+
+Grafana includes a starter `RAG Observability` dashboard for:
+
+- HTTP request rate and p95 latency
+- average query latency by route
+- estimated query cost by model
+- experiment event volume
+- provider publish success and failure
+
+### 4. Live updates while developing
 
 - frontend changes update through the mounted `./frontend` volume
 - backend changes reload through `uvicorn --reload`
@@ -220,6 +314,7 @@ The chat response now also includes memory-related fields such as:
 - uploaded PDFs are stored in `backend/data/uploads/`
 - exports are written to `backend/data/exports/`
 - the backend creates tables and the `vector` extension on startup
+- additive compatibility migrations run on startup for recently introduced columns on existing tables
 - `pgvector` is the active vector store for the current app
 - conversation memory, semantic summaries, graph nodes, and document access history are persisted in Postgres
 - the legacy notebook and `app.py` remain in the repo as prototype history

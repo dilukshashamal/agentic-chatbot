@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from uuid import UUID
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.db.models import DocumentChunkRecord, DocumentRecord
 from app.services.documents import normalize_text, text_quality_score
+from app.services.metrics import observe_index
+from app.services.model_management import ModelManagementService
 
 
 @dataclass(frozen=True)
@@ -21,12 +24,12 @@ class BuildIndexResult:
     chunk_count: int
 
 
-def _get_embeddings(settings: Settings) -> GoogleGenerativeAIEmbeddings:
+def _get_embeddings(settings: Settings, model_name: str | None = None) -> GoogleGenerativeAIEmbeddings:
     if not settings.google_api_key:
         raise RuntimeError("GOOGLE_API_KEY is required to build or query the RAG index.")
 
     return GoogleGenerativeAIEmbeddings(
-        model=settings.embedding_model,
+        model=model_name or settings.embedding_model,
         google_api_key=settings.google_api_key,
     )
 
@@ -89,6 +92,7 @@ def split_documents(settings: Settings, documents: list[LCDocument]) -> list[LCD
 
 
 def build_index(settings: Settings, session: Session, document: DocumentRecord) -> BuildIndexResult:
+    started_at = time.perf_counter()
     documents = load_pdf_documents(document)
     chunks = split_documents(settings, documents)
     if not chunks:
@@ -115,6 +119,23 @@ def build_index(settings: Settings, session: Session, document: DocumentRecord) 
     document.chunk_count = len(chunks)
     session.add(document)
     session.commit()
+
+    ModelManagementService(settings, session).log_index_experiment(
+        document_id=document.id,
+        page_count=len(documents),
+        chunk_count=len(chunks),
+        duration_ms=(time.perf_counter() - started_at) * 1000.0,
+        metadata_json={
+            "embedding_model": settings.embedding_model,
+            "chunk_size": settings.chunk_size,
+            "chunk_overlap": settings.chunk_overlap,
+        },
+    )
+    observe_index(
+        status="completed",
+        embedding_model=settings.embedding_model,
+        latency_seconds=max(time.perf_counter() - started_at, 0.0),
+    )
 
     return BuildIndexResult(
         document_id=document.id,
