@@ -1,6 +1,6 @@
 import json
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.db.models import DocumentRecord
+from app.db.models import ConversationRecord, DocumentRecord
 from app.models.schemas import BuildIndexResponse, ChatRequest, ChatResponse, Citation, LLMAnswer, SystemStatus
 from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.indexing import build_index
@@ -167,10 +167,13 @@ class RAGService:
             ready_document_count=ready_document_count,
             chat_model=self.settings.chat_model,
             embedding_model=self.settings.embedding_model,
+            orchestration_enabled=True,
+            conversation_count=self.session.scalar(select(func.count()).select_from(ConversationRecord)) or 0,
         )
 
     def _abstain(
         self,
+        conversation_id: UUID,
         reason: str,
         retrieved_chunks: list[RetrievedChunk],
         notes: list[str] | None = None,
@@ -186,6 +189,7 @@ class RAGService:
             for chunk in retrieved_chunks[:2]
         ]
         return ChatResponse(
+            conversation_id=conversation_id,
             answer="I could not find enough reliable support in the PDF to answer that question.",
             grounded=False,
             confidence=min(self._retrieval_confidence(retrieved_chunks), 0.35),
@@ -196,6 +200,7 @@ class RAGService:
         )
 
     def answer_question(self, payload: ChatRequest) -> ChatResponse:
+        conversation_id = payload.conversation_id or uuid4()
         if payload.document_id is not None:
             document = self.session.get(DocumentRecord, payload.document_id)
             if document is None:
@@ -220,10 +225,11 @@ class RAGService:
         )
 
         if not retrieved_chunks:
-            return self._abstain("No relevant chunks were retrieved.", [])
+            return self._abstain(conversation_id, "No relevant chunks were retrieved.", [])
 
         if retrieved_chunks[0].score < self.settings.min_retrieval_score:
             return self._abstain(
+                conversation_id,
                 "Top retrieval score was below the grounding threshold.",
                 retrieved_chunks,
             )
@@ -239,6 +245,7 @@ class RAGService:
             parsed = self._parse_llm_response(self._extract_message_text(raw_response.content))
         except Exception:
             return self._abstain(
+                conversation_id,
                 "The model response could not be parsed into the required JSON schema.",
                 retrieved_chunks,
             )
@@ -246,6 +253,7 @@ class RAGService:
 
         if not parsed.grounded:
             return self._abstain(
+                conversation_id,
                 "The model marked the answer as ungrounded.",
                 retrieved_chunks,
                 parsed.missing_information,
@@ -253,6 +261,7 @@ class RAGService:
 
         if not citations:
             return self._abstain(
+                conversation_id,
                 "The model returned no valid citations from the retrieved context.",
                 retrieved_chunks,
                 parsed.missing_information,
@@ -265,6 +274,7 @@ class RAGService:
         )
 
         return ChatResponse(
+            conversation_id=conversation_id,
             answer=parsed.answer.strip(),
             grounded=True,
             confidence=confidence,

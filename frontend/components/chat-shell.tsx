@@ -167,6 +167,7 @@ export function ChatShell() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -225,7 +226,8 @@ export function ChatShell() {
 
     startTransition(async () => {
       try {
-        const response = await askQuestion(cleaned);
+        const response = await askQuestion(cleaned, conversationId);
+        setConversationId(response.conversation_id);
         setMessages((cur) => [
           ...cur,
           {

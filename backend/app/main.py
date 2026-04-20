@@ -15,6 +15,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    settings.export_dir.mkdir(parents=True, exist_ok=True)
     init_database(settings)
     yield
 

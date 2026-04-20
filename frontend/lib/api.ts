@@ -18,6 +18,7 @@ export type DocumentSummary = {
 };
 
 export type ChatResponse = {
+  conversation_id: string;
   answer: string;
   grounded: boolean;
   confidence: number;
@@ -25,6 +26,19 @@ export type ChatResponse = {
   citations: Citation[];
   retrieved_chunks: number;
   system_notes: string[];
+  route: string;
+  memory_summary?: string | null;
+  agent_trace?: Array<{
+    agent: string;
+    status: "completed" | "skipped" | "fallback" | "failed";
+    summary: string;
+    retries: number;
+  }>;
+  exports?: Array<{
+    format: "json" | "pdf" | "docx";
+    path: string;
+    created_at: string;
+  }>;
 };
 
 export type SystemStatus = {
@@ -76,13 +90,17 @@ export async function uploadDocument(file: File): Promise<{ message: string; doc
   return handleResponse<{ message: string; document: DocumentSummary }>(response);
 }
 
-export async function askQuestion(query: string): Promise<ChatResponse> {
+export async function askQuestion(
+  query: string,
+  conversationId?: string | null,
+): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/api/v1/chat/query`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
+      conversation_id: conversationId ?? null,
       query,
       top_k: 4,
       include_sources: true,

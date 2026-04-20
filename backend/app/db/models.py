@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -65,3 +65,86 @@ class DocumentChunkRecord(Base):
     )
 
     document: Mapped[DocumentRecord] = relationship(back_populates="chunks")
+
+
+class ConversationRecord(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    memory_summary: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    user_preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    turns: Mapped[list["ConversationTurnRecord"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    checkpoints: Mapped[list["ConversationCheckpointRecord"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class ConversationTurnRecord(Base):
+    __tablename__ = "conversation_turns"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    query: Mapped[str] = mapped_column(Text())
+    answer: Mapped[str] = mapped_column(Text())
+    route: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    grounded: Mapped[bool] = mapped_column(Boolean, default=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    response_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    conversation: Mapped[ConversationRecord] = relationship(back_populates="turns")
+    checkpoints: Mapped[list["ConversationCheckpointRecord"]] = relationship(
+        back_populates="turn",
+        passive_deletes=True,
+    )
+
+
+class ConversationCheckpointRecord(Base):
+    __tablename__ = "conversation_checkpoints"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_turns.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    node_name: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="completed")
+    state_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    conversation: Mapped[ConversationRecord] = relationship(back_populates="checkpoints")
+    turn: Mapped[ConversationTurnRecord | None] = relationship(back_populates="checkpoints")

@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     min_retrieval_score: float = Field(default=0.18, ge=0.0, le=1.0)
 
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    export_dir: Path = BACKEND_ROOT / "data" / "exports"
+
+    orchestration_model: str = "gemini-2.5-flash"
+    supervisor_max_steps: int = Field(default=4, ge=1, le=8)
+    conversation_history_window: int = Field(default=6, ge=2, le=20)
+    max_agent_retries: int = Field(default=2, ge=0, le=5)
+    web_search_enabled: bool = True
+    calculator_enabled: bool = True
+    code_interpreter_enabled: bool = True
+    chart_generation_enabled: bool = True
+    export_enabled: bool = True
 
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]

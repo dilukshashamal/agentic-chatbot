@@ -1,15 +1,21 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+ExportFormat = Literal["json", "pdf", "docx"]
+
+
 class ChatRequest(BaseModel):
+    conversation_id: UUID | None = None
     document_id: UUID | None = None
     query: str = Field(min_length=3, max_length=1000)
     top_k: int = Field(default=4, ge=2, le=8)
     include_sources: bool = True
+    export_formats: list[ExportFormat] = Field(default_factory=list, max_length=3)
+    user_preferences: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("query")
     @classmethod
@@ -29,6 +35,7 @@ class Citation(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    conversation_id: UUID
     answer: str
     grounded: bool
     confidence: float = Field(ge=0.0, le=1.0)
@@ -36,6 +43,10 @@ class ChatResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     retrieved_chunks: int = Field(ge=0)
     system_notes: list[str] = Field(default_factory=list)
+    route: str = "document_grounded"
+    memory_summary: str | None = None
+    agent_trace: list["AgentTrace"] = Field(default_factory=list)
+    exports: list["ExportArtifact"] = Field(default_factory=list)
 
 
 class LLMAnswer(BaseModel):
@@ -60,6 +71,8 @@ class SystemStatus(BaseModel):
     ready_document_count: int = Field(ge=0)
     chat_model: str
     embedding_model: str
+    orchestration_enabled: bool = True
+    conversation_count: int = Field(default=0, ge=0)
 
 
 class DocumentSummary(BaseModel):
@@ -78,3 +91,44 @@ class DocumentSummary(BaseModel):
 class DocumentUploadResponse(BaseModel):
     message: str
     document: DocumentSummary
+
+
+class AgentTrace(BaseModel):
+    agent: str
+    status: Literal["completed", "skipped", "fallback", "failed"]
+    summary: str
+    retries: int = Field(default=0, ge=0)
+
+
+class ExportArtifact(BaseModel):
+    format: ExportFormat
+    path: str
+    created_at: datetime
+
+
+class ConversationTurnSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    query: str
+    answer: str
+    route: str | None = None
+    grounded: bool
+    confidence: float
+    created_at: datetime
+    response_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConversationDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str | None = None
+    memory_summary: str | None = None
+    user_preferences: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+    turns: list[ConversationTurnSummary] = Field(default_factory=list)
+
+
+ChatResponse.model_rebuild()
