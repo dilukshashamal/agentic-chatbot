@@ -19,9 +19,9 @@ Synkora AI is a multi-document RAG platform for uploading PDFs, indexing them in
 
 ## Product Screens
 
-### Chat Workspace
+### Main Dashboard
 
-![Chat workspace](images/synkora_dash.png)
+![Main dashboard](images/frontend_interface.png)
 
 ### MLflow Tracking
 
