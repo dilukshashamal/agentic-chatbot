@@ -68,6 +68,7 @@ class PgVectorRetriever:
             retrieved.append(
                 RetrievedChunk(
                     chunk_id=self._chunk_id(chunk.document_id, chunk.chunk_index),
+                    document_id=chunk.document_id,
                     content=chunk.content,
                     page_number=chunk.page_number,
                     source=document_name,

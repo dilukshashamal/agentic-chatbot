@@ -169,6 +169,7 @@ class RAGService:
             embedding_model=self.settings.embedding_model,
             orchestration_enabled=True,
             conversation_count=self.session.scalar(select(func.count()).select_from(ConversationRecord)) or 0,
+            memory_provider=self.settings.memory_provider,
         )
 
     def _abstain(

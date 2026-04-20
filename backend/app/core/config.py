@@ -43,13 +43,27 @@ class Settings(BaseSettings):
 
     orchestration_model: str = "gemini-2.5-flash"
     supervisor_max_steps: int = Field(default=4, ge=1, le=8)
-    conversation_history_window: int = Field(default=6, ge=2, le=20)
+    conversation_history_window: int = Field(default=10, ge=2, le=20)
     max_agent_retries: int = Field(default=2, ge=0, le=5)
     web_search_enabled: bool = True
     calculator_enabled: bool = True
     code_interpreter_enabled: bool = True
     chart_generation_enabled: bool = True
     export_enabled: bool = True
+
+    memory_provider: Literal["local", "mem0", "zep"] = "local"
+    memory_search_k: int = Field(default=5, ge=1, le=12)
+    memory_similarity_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+    query_refinement_window: int = Field(default=10, ge=3, le=30)
+    memory_summary_window: int = Field(default=4, ge=2, le=10)
+    faq_min_count: int = Field(default=2, ge=1, le=20)
+    knowledge_graph_max_entities: int = Field(default=8, ge=2, le=20)
+    enable_semantic_memory_search: bool = True
+
+    mem0_api_key: str | None = Field(default=None, alias="MEM0_API_KEY")
+    mem0_base_url: str | None = Field(default=None, alias="MEM0_BASE_URL")
+    zep_api_key: str | None = Field(default=None, alias="ZEP_API_KEY")
+    zep_base_url: str | None = Field(default=None, alias="ZEP_BASE_URL")
 
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]

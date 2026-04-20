@@ -15,11 +15,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.db.models import DocumentRecord
-from app.models.schemas import AgentTrace, ChatRequest, ChatResponse, Citation
+from app.db.models import ConversationRecord, DocumentRecord
+from app.models.schemas import AgentTrace, ChatRequest, ChatResponse, Citation, MemoryAction, MemoryHit
 from app.services.conversations import ConversationService
 from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.exports import ExportService
+from app.services.memory import MemoryService
 from app.services.retrieval import PgVectorRetriever
 
 try:  # pragma: no cover - optional dependency
@@ -62,6 +63,11 @@ class AgentState(TypedDict, total=False):
     user_preferences: dict[str, str]
     memory_summary: str
     conversation_history: list[dict[str, str]]
+    short_term_memory: list[str]
+    semantic_memories: list[dict[str, Any]]
+    memory_actions: list[dict[str, Any]]
+    knowledge_graph_topics: list[str]
+    custom_instructions: str
     route: str
     route_reason: str
     reasoning_mode: str
@@ -88,6 +94,7 @@ class MultiAgentOrchestrator:
         self.retriever = PgVectorRetriever(settings, session)
         self.conversations = ConversationService(session)
         self.exports = ExportService(settings)
+        self.memory = MemoryService(settings, session)
         self._llm: ChatGoogleGenerativeAI | None = None
         self._graph = None
         self._checkpointer = MemorySaver() if LANGGRAPH_AVAILABLE and MemorySaver is not None else None
@@ -196,6 +203,10 @@ class MultiAgentOrchestrator:
             "question": state.get("question"),
             "route": state.get("route"),
             "reasoning_mode": state.get("reasoning_mode"),
+            "short_term_memory": state.get("short_term_memory", []),
+            "semantic_memories": state.get("semantic_memories", []),
+            "memory_actions": state.get("memory_actions", []),
+            "knowledge_graph_topics": state.get("knowledge_graph_topics", []),
             "pending_agents": state.get("pending_agents", []),
             "system_notes": state.get("system_notes", []),
             "agent_trace": state.get("agent_trace", []),
@@ -222,6 +233,51 @@ class MultiAgentOrchestrator:
             status=status,
             state_payload=self._checkpoint_payload(state),
         )
+
+    def _handle_memory_command(
+        self,
+        conversation: ConversationRecord,
+        payload: ChatRequest,
+        state: AgentState,
+    ) -> ChatResponse | None:
+        command = self.memory.parse_command(payload.query)
+        if command is None:
+            return None
+
+        if command.action == "remember" and command.target:
+            actions = self.memory.remember(conversation.id, command.target)
+            answer = f"I'll remember that: {command.target}"
+        elif command.action == "forget_all":
+            actions = self.memory.forget(conversation.id, forget_all=True)
+            answer = "I cleared the stored conversation memory for this session."
+        elif command.action in {"forget", "forget_last"}:
+            actions = self.memory.forget(conversation.id, target=command.target)
+            answer = "I removed the matching memory I had stored." if actions else "I couldn't find a matching stored memory to remove."
+        else:
+            actions = [MemoryAction(action="ignored", target="memory", detail="That memory command was not understood.")]
+            answer = "I couldn't understand that memory instruction."
+
+        conversation = self.conversations.get_conversation(conversation.id) or conversation
+        short_term = self.memory.load_short_term_context(conversation)
+        response = ChatResponse(
+            conversation_id=conversation.id,
+            answer=answer,
+            grounded=True,
+            confidence=0.99,
+            answer_mode="grounded",
+            citations=[],
+            retrieved_chunks=0,
+            system_notes=["Memory command processed without document retrieval."],
+            route="memory_command",
+            memory_summary=conversation.memory_summary,
+            short_term_memory=short_term["short_term_memory"],
+            long_term_memory=self.memory.semantic_search(conversation.id, command.target or payload.query),
+            memory_actions=actions,
+            knowledge_graph_topics=self.memory.top_topics(conversation.id),
+            agent_trace=[AgentTrace(agent="memory", status="completed", summary="Processed explicit memory command.", retries=0)],
+            exports=[],
+        )
+        return response
 
     @staticmethod
     def _retrieval_confidence(chunks: list[RetrievedChunk]) -> float:
@@ -313,21 +369,42 @@ class MultiAgentOrchestrator:
         }
 
     def _memory_agent(self, state: AgentState) -> AgentState:
-        history = state.get("conversation_history", [])
-        preferences = state.get("user_preferences", {})
-        if not history:
+        conversation = self.conversations.get_conversation(UUID(state["conversation_id"]))
+        if conversation is None:
             state["memory_summary"] = "New conversation."
+            state["short_term_memory"] = []
+            state["semantic_memories"] = []
+            state["knowledge_graph_topics"] = []
             self._append_trace(state, "memory", "completed", "Started a new conversation memory.")
             self._save_checkpoint(state["conversation_id"], "memory", "completed", state)
             return state
 
-        summary = " | ".join(f"Q: {turn['query']} A: {turn['answer'][:120]}" for turn in history[-3:])
+        short_term = self.memory.load_short_term_context(conversation)
+        semantic_hits = self.memory.semantic_search(conversation.id, state["question"])
+        preferences = {
+            **(conversation.user_preferences or {}),
+            **state.get("user_preferences", {}),
+        }
+        memory_parts: list[str] = []
+        if short_term["short_term_memory"]:
+            memory_parts.append("Recent turns: " + " | ".join(short_term["short_term_memory"][-3:]))
+        if semantic_hits:
+            memory_parts.append(
+                "Relevant long-term memory: "
+                + " | ".join(hit.content for hit in semantic_hits[:3])
+            )
         if preferences:
             pref_summary = ", ".join(f"{key}={value}" for key, value in preferences.items())
-            state["memory_summary"] = f"{summary} | preferences: {pref_summary}"
-        else:
-            state["memory_summary"] = summary
-        self._append_trace(state, "memory", "completed", "Loaded recent conversation context.")
+            memory_parts.append(f"Preferences: {pref_summary}")
+        if short_term.get("custom_instructions"):
+            memory_parts.append(f"Custom instructions: {short_term['custom_instructions']}")
+
+        state["memory_summary"] = " | ".join(memory_parts) if memory_parts else "New conversation."
+        state["short_term_memory"] = short_term["short_term_memory"]
+        state["semantic_memories"] = [hit.model_dump(mode="json") for hit in semantic_hits]
+        state["knowledge_graph_topics"] = self.memory.top_topics(conversation.id)
+        state["custom_instructions"] = short_term.get("custom_instructions") or ""
+        self._append_trace(state, "memory", "completed", "Loaded short-term, long-term, and graph memory context.")
         self._save_checkpoint(state["conversation_id"], "memory", "completed", state)
         return state
 
@@ -341,6 +418,7 @@ class MultiAgentOrchestrator:
         human_prompt = (
             f"Question: {state['question']}\n"
             f"Conversation memory: {state.get('memory_summary', 'None')}\n"
+            f"Knowledge graph topics: {', '.join(state.get('knowledge_graph_topics', [])) or 'None'}\n"
             f"Ready documents: {self._ready_document_count()}\n"
             "Focus on grounded document answers first, then add analysis or tools only if justified."
         )
@@ -723,6 +801,7 @@ class MultiAgentOrchestrator:
                 dict.fromkeys(
                     [
                         state.get("route_reason", ""),
+                        *([self.memory.provider.note] if self.memory.provider.note else []),
                         *state.get("citation_result", {}).get("notes", []),
                         *final_result.get("system_notes", []),
                     ]
@@ -730,6 +809,10 @@ class MultiAgentOrchestrator:
             ),
             route=state.get("route", "document_grounded"),
             memory_summary=state.get("memory_summary"),
+            short_term_memory=state.get("short_term_memory", []),
+            long_term_memory=[MemoryHit(**item) for item in state.get("semantic_memories", [])],
+            memory_actions=[MemoryAction(**item) for item in state.get("memory_actions", [])],
+            knowledge_graph_topics=state.get("knowledge_graph_topics", []),
             agent_trace=[AgentTrace(**item) for item in state.get("agent_trace", [])],
             exports=[],
         )
@@ -821,7 +904,12 @@ class MultiAgentOrchestrator:
         state = self._run_with_retry("finalize", state, self._finalize)
         return state
 
-    def _persist_response(self, response: ChatResponse, payload: ChatRequest) -> None:
+    def _persist_response(
+        self,
+        response: ChatResponse,
+        payload: ChatRequest,
+        retrieved_chunks: list[RetrievedChunk] | None = None,
+    ) -> ChatResponse:
         turn = self.conversations.add_turn(
             conversation_id=response.conversation_id,
             query=payload.query,
@@ -838,10 +926,33 @@ class MultiAgentOrchestrator:
             status="completed",
             state_payload=response.model_dump(mode="json"),
         )
+        conversation = self.conversations.get_conversation(response.conversation_id)
+        if conversation is None:
+            return response
+
+        memory_update = self.memory.update_after_response(
+            conversation=conversation,
+            query=payload.query,
+            response_text=response.answer,
+            route=response.route,
+            retrieved_chunks=retrieved_chunks or [],
+            user_preferences=payload.user_preferences,
+        )
+        active_document_id = memory_update.get("active_document_id")
         self.conversations.update_memory(
             conversation_id=response.conversation_id,
-            memory_summary=response.memory_summary,
+            memory_summary=memory_update.get("memory_summary") or response.memory_summary,
             user_preferences=payload.user_preferences,
+            active_document_id=active_document_id,
+            query_refinement_history=memory_update.get("query_refinement_history"),
+            interaction_patterns=memory_update.get("interaction_patterns"),
+            custom_instructions=conversation.custom_instructions,
+        )
+        return response.model_copy(
+            update={
+                "memory_summary": memory_update.get("memory_summary") or response.memory_summary,
+                "knowledge_graph_topics": self.memory.top_topics(response.conversation_id),
+            }
         )
 
     def _simple_retrieval_response(self, payload: ChatRequest, conversation_id: str, error_message: str) -> ChatResponse:
@@ -866,6 +977,8 @@ class MultiAgentOrchestrator:
             else "I could not find enough reliable support in the documents to answer that."
         )
         conversation = self.conversations.get_conversation(UUID(conversation_id))
+        memory_hits = self.memory.semantic_search(UUID(conversation_id), payload.query)
+        short_term = self.memory.load_short_term_context(conversation) if conversation is not None else {"short_term_memory": []}
         return ChatResponse(
             conversation_id=UUID(conversation_id),
             answer=answer,
@@ -878,9 +991,16 @@ class MultiAgentOrchestrator:
             ),
             citations=citations if payload.include_sources else [],
             retrieved_chunks=len(retrieved_chunks),
-            system_notes=[f"The orchestrator fell back to simpler retrieval: {error_message}"],
+            system_notes=[
+                f"The orchestrator fell back to simpler retrieval: {error_message}",
+                *([self.memory.provider.note] if self.memory.provider.note else []),
+            ],
             route="fallback_retrieval",
             memory_summary=conversation.memory_summary if conversation is not None else None,
+            short_term_memory=short_term["short_term_memory"],
+            long_term_memory=memory_hits,
+            memory_actions=[],
+            knowledge_graph_topics=self.memory.top_topics(UUID(conversation_id)),
             agent_trace=[
                 AgentTrace(
                     agent="supervisor",
@@ -893,8 +1013,12 @@ class MultiAgentOrchestrator:
         )
 
     def answer_question(self, payload: ChatRequest) -> ChatResponse:
-        self._validate_document_scope(payload)
         conversation = self.conversations.get_or_create_conversation(payload.conversation_id, payload.user_preferences)
+        command_response = self._handle_memory_command(conversation, payload, {})
+        if command_response is not None:
+            return self._persist_response(command_response, payload, [])
+
+        self._validate_document_scope(payload)
         state: AgentState = {
             "conversation_id": str(conversation.id),
             "document_id": str(payload.document_id) if payload.document_id else None,
@@ -905,12 +1029,18 @@ class MultiAgentOrchestrator:
             "user_preferences": payload.user_preferences,
             "conversation_history": self._history_payload(str(conversation.id)),
             "memory_summary": conversation.memory_summary or "",
+            "short_term_memory": [],
+            "semantic_memories": [],
+            "memory_actions": [],
+            "knowledge_graph_topics": [],
+            "custom_instructions": conversation.custom_instructions or "",
             "pending_agents": [],
             "system_notes": [],
             "agent_trace": [],
         }
         self._save_checkpoint(str(conversation.id), "start", "started", state)
 
+        retrieved_chunks: list[RetrievedChunk] = []
         try:
             graph = self._build_graph()
             if graph is not None:
@@ -921,8 +1051,8 @@ class MultiAgentOrchestrator:
             else:
                 final_state = self._run_without_langgraph(state)
             response = final_state["response"]
+            retrieved_chunks = final_state.get("retrieved_chunks", [])
         except Exception as exc:
             response = self._simple_retrieval_response(payload, str(conversation.id), str(exc))
 
-        self._persist_response(response, payload)
-        return response
+        return self._persist_response(response, payload, retrieved_chunks)

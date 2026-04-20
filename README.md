@@ -12,6 +12,7 @@ Synkora AI is a multi-document RAG application for uploading PDFs, indexing them
 - background PDF indexing after upload
 - multi-agent orchestration layer for routing, memory, grounding, analysis, and tool use
 - conversation persistence with checkpoints for multi-turn workflows
+- multi-level memory with short-term, long-term, and knowledge-graph layers
 - source citations attached to grounded answers
 
 ## Multi-Agent Flow
@@ -26,6 +27,55 @@ The backend now supports a supervisor-style orchestration flow built around spec
 - `Tool Use Agent`: search, calculation, transformation, charting, and export support
 
 When optional libraries are unavailable, the system degrades gracefully to simpler retrieval instead of crashing.
+
+## Memory Architecture
+
+The backend now includes a multi-level memory system:
+
+### Short-Term Memory
+
+- last 10 conversation turns
+- active document focus tracking
+- query refinement history for follow-up handling
+
+### Long-Term Memory
+
+- user preferences and interaction patterns
+- custom instructions and tone preferences
+- document access frequency and recency
+- FAQ tracking based on repeated user questions
+- embedded conversation summaries for semantic recall
+
+### Knowledge Graph Memory
+
+- topic and entity nodes extracted from conversations
+- relationship edges built from co-occurring entities/topics
+- top topic tracking per conversation
+- forgetting support for GDPR-style removal
+
+### Memory Commands
+
+Supported command-style prompts include:
+
+- `remember this: ...`
+- `remember that: ...`
+- `forget this: ...`
+- `forget that`
+- `forget everything`
+
+These commands are handled directly by the memory layer without requiring document retrieval.
+
+### Memory Providers
+
+The current production-ready behavior uses the local Postgres-backed memory store.
+
+Config supports:
+
+- `local`
+- `mem0`
+- `zep`
+
+If `mem0` or `zep` is selected without real provider configuration, the system safely falls back to the local memory implementation.
 
 ## Architecture
 
@@ -93,6 +143,12 @@ Services:
 - Backend: `http://localhost:8000`
 - Postgres: `localhost:5432`
 
+If you recently pulled changes that added new tables or dependencies, rebuild the backend image so startup creates the new schema:
+
+```bash
+docker compose up --build backend
+```
+
 ### 3. Live updates while developing
 
 - frontend changes update through the mounted `./frontend` volume
@@ -152,12 +208,20 @@ Important endpoints:
 
 Chat requests can be scoped to a specific document with `document_id`, or run across all ready documents when no document is provided.
 
+The chat response now also includes memory-related fields such as:
+
+- short-term memory snippets
+- long-term semantic memory hits
+- memory actions from `remember` / `forget` commands
+- knowledge-graph topic summaries
+
 ## Notes
 
 - uploaded PDFs are stored in `backend/data/uploads/`
 - exports are written to `backend/data/exports/`
 - the backend creates tables and the `vector` extension on startup
 - `pgvector` is the active vector store for the current app
+- conversation memory, semantic summaries, graph nodes, and document access history are persisted in Postgres
 - the legacy notebook and `app.py` remain in the repo as prototype history
 
 ## Optional Dependencies
@@ -169,6 +233,13 @@ Some orchestration features depend on optional libraries:
 - `matplotlib` for chart generation
 - `python-docx` for DOCX export
 - `reportlab` for PDF export
+
+Optional memory-provider environment variables:
+
+- `MEM0_API_KEY`
+- `MEM0_BASE_URL`
+- `ZEP_API_KEY`
+- `ZEP_BASE_URL`
 
 If one of these is missing, the backend falls back to a simpler path where possible.
 

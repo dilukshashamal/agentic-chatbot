@@ -28,6 +28,20 @@ export type ChatResponse = {
   system_notes: string[];
   route: string;
   memory_summary?: string | null;
+  short_term_memory?: string[];
+  long_term_memory?: Array<{
+    id: string;
+    memory_type: string;
+    content: string;
+    score: number;
+    metadata: Record<string, unknown>;
+  }>;
+  memory_actions?: Array<{
+    action: "remembered" | "forgotten" | "updated" | "ignored";
+    target: string;
+    detail: string;
+  }>;
+  knowledge_graph_topics?: string[];
   agent_trace?: Array<{
     agent: string;
     status: "completed" | "skipped" | "fallback" | "failed";
@@ -48,6 +62,9 @@ export type SystemStatus = {
   ready_document_count: number;
   chat_model: string;
   embedding_model: string;
+  orchestration_enabled?: boolean;
+  conversation_count?: number;
+  memory_provider?: string;
 };
 
 const API_BASE_URL =

@@ -22,6 +22,7 @@ SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
 @dataclass(frozen=True)
 class RetrievedChunk:
     chunk_id: str
+    document_id: UUID
     content: str
     page_number: int | None
     source: str

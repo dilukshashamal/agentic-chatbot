@@ -45,6 +45,10 @@ class ChatResponse(BaseModel):
     system_notes: list[str] = Field(default_factory=list)
     route: str = "document_grounded"
     memory_summary: str | None = None
+    short_term_memory: list[str] = Field(default_factory=list)
+    long_term_memory: list["MemoryHit"] = Field(default_factory=list)
+    memory_actions: list["MemoryAction"] = Field(default_factory=list)
+    knowledge_graph_topics: list[str] = Field(default_factory=list)
     agent_trace: list["AgentTrace"] = Field(default_factory=list)
     exports: list["ExportArtifact"] = Field(default_factory=list)
 
@@ -73,6 +77,7 @@ class SystemStatus(BaseModel):
     embedding_model: str
     orchestration_enabled: bool = True
     conversation_count: int = Field(default=0, ge=0)
+    memory_provider: str = "local"
 
 
 class DocumentSummary(BaseModel):
@@ -106,6 +111,20 @@ class ExportArtifact(BaseModel):
     created_at: datetime
 
 
+class MemoryHit(BaseModel):
+    id: str
+    memory_type: str
+    content: str
+    score: float = Field(ge=0.0, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryAction(BaseModel):
+    action: Literal["remembered", "forgotten", "updated", "ignored"]
+    target: str
+    detail: str
+
+
 class ConversationTurnSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -126,6 +145,10 @@ class ConversationDetail(BaseModel):
     title: str | None = None
     memory_summary: str | None = None
     user_preferences: dict[str, Any] = Field(default_factory=dict)
+    interaction_patterns: dict[str, Any] = Field(default_factory=dict)
+    query_refinement_history: list[dict[str, Any]] = Field(default_factory=list)
+    custom_instructions: str | None = None
+    active_document_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
     turns: list[ConversationTurnSummary] = Field(default_factory=list)
