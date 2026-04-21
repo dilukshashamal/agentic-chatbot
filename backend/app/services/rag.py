@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.db.models import ConversationRecord, DocumentRecord
 from app.models.schemas import BuildIndexResponse, ChatRequest, ChatResponse, Citation, LLMAnswer, SystemStatus
 from app.services.documents import RetrievedChunk, trim_excerpt
+from app.services.grounding import assess_grounding_support
 from app.services.indexing import build_index
 from app.services.model_management import ModelManagementService
 from app.services.retrieval import PgVectorRetriever
@@ -186,23 +187,13 @@ class RAGService:
         retrieved_chunks: list[RetrievedChunk],
         notes: list[str] | None = None,
     ) -> ChatResponse:
-        citations = [
-            Citation(
-                chunk_id=chunk.chunk_id,
-                source=chunk.source,
-                page=chunk.page_number,
-                score=chunk.score,
-                excerpt=trim_excerpt(chunk.content),
-            )
-            for chunk in retrieved_chunks[:2]
-        ]
         return ChatResponse(
             conversation_id=conversation_id,
-            answer="I could not find enough reliable support in the PDF to answer that question.",
+            answer="I could not find enough reliable support in the uploaded documents to answer that.",
             grounded=False,
             confidence=min(self._retrieval_confidence(retrieved_chunks), 0.35),
             answer_mode="insufficient_context",
-            citations=citations,
+            citations=[],
             retrieved_chunks=len(retrieved_chunks),
             system_notes=[reason, *(notes or [])],
         )
@@ -235,10 +226,15 @@ class RAGService:
         if not retrieved_chunks:
             return self._abstain(conversation_id, "No relevant chunks were retrieved.", [])
 
-        if retrieved_chunks[0].score < self.settings.min_retrieval_score:
+        support = assess_grounding_support(
+            payload.query,
+            retrieved_chunks,
+            min_retrieval_score=self.settings.min_retrieval_score,
+        )
+        if not support.supported:
             return self._abstain(
                 conversation_id,
-                "Top retrieval score was below the grounding threshold.",
+                support.reason,
                 retrieved_chunks,
             )
 

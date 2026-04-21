@@ -20,6 +20,7 @@ from app.models.schemas import AgentTrace, ChatRequest, ChatResponse, Citation, 
 from app.services.conversations import ConversationService
 from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.exports import ExportService
+from app.services.grounding import GroundingAssessment, assess_grounding_support
 from app.services.memory import MemoryService
 from app.services.metrics import observe_query
 from app.services.model_management import ModelManagementService, RuntimeModelProfile
@@ -313,6 +314,17 @@ class MultiAgentOrchestrator:
             return 0.0
         return round(sum(chunk.score for chunk in chunks) / len(chunks), 2)
 
+    def _grounding_assessment(self, question: str, chunks: list[RetrievedChunk]) -> GroundingAssessment:
+        return assess_grounding_support(
+            question,
+            chunks,
+            min_retrieval_score=self.settings.min_retrieval_score,
+        )
+
+    @staticmethod
+    def _unsupported_answer_text() -> str:
+        return "I could not find enough reliable support in the uploaded documents to answer that."
+
     def _select_citations(
         self,
         requested_chunk_ids: list[str],
@@ -487,6 +499,18 @@ class MultiAgentOrchestrator:
                 "key_insights": [],
                 "grounded": False,
                 "notes": ["No relevant chunks were retrieved."],
+                "cited_chunk_ids": [],
+            }
+            return state
+
+        support = self._grounding_assessment(state["question"], retrieved_chunks)
+        if not support.supported:
+            state["document_result"] = {
+                "summary": "",
+                "entities": [],
+                "key_insights": [],
+                "grounded": False,
+                "notes": [support.reason],
                 "cited_chunk_ids": [],
             }
             return state
@@ -758,6 +782,17 @@ class MultiAgentOrchestrator:
             self._save_checkpoint(state["conversation_id"], "citation", "completed", state)
             return state
 
+        support = self._grounding_assessment(state["question"], chunks)
+        if not support.supported:
+            state["citation_result"] = {
+                "grounded": False,
+                "confidence": min(self._retrieval_confidence(chunks[:2]), 0.35),
+                "cited_chunk_ids": [],
+                "notes": [support.reason],
+            }
+            self._save_checkpoint(state["conversation_id"], "citation", "completed", state)
+            return state
+
         system_prompt = (
             "You are a citation agent. Validate whether the draft answer is grounded in the retrieved document evidence. "
             "Return JSON with keys: grounded, confidence, cited_chunk_ids, notes."
@@ -786,6 +821,57 @@ class MultiAgentOrchestrator:
         doc_result = state.get("document_result", {})
         analytical_result = state.get("analytical_result", {})
         tool_result = state.get("tool_result", {})
+        support = self._grounding_assessment(state["question"], chunks)
+
+        if not support.supported:
+            response = ChatResponse(
+                conversation_id=UUID(state["conversation_id"]),
+                answer=self._unsupported_answer_text(),
+                grounded=False,
+                confidence=min(self._retrieval_confidence(chunks[:2]), 0.35),
+                answer_mode="insufficient_context",
+                citations=[],
+                retrieved_chunks=len(chunks),
+                system_notes=list(
+                    dict.fromkeys(
+                        [
+                            state.get("route_reason", ""),
+                            support.reason,
+                            *([self.memory.provider.note] if self.memory.provider.note else []),
+                            *doc_result.get("notes", []),
+                            *analytical_result.get("notes", []),
+                        ]
+                    )
+                ),
+                route=state.get("route", "document_grounded"),
+                memory_summary=state.get("memory_summary"),
+                short_term_memory=state.get("short_term_memory", []),
+                long_term_memory=[MemoryHit(**item) for item in state.get("semantic_memories", [])],
+                memory_actions=[MemoryAction(**item) for item in state.get("memory_actions", [])],
+                knowledge_graph_topics=state.get("knowledge_graph_topics", []),
+                agent_trace=[AgentTrace(**item) for item in state.get("agent_trace", [])],
+                exports=[],
+            )
+
+            if state.get("export_formats"):
+                response = response.model_copy(
+                    update={
+                        "exports": self._create_exports(
+                            response,
+                            [str(item) for item in state.get("export_formats", [])],
+                        )
+                    }
+                )
+
+            state["response"] = response
+            state["final_answer"] = response.answer
+            state["grounded"] = response.grounded
+            state["confidence"] = response.confidence
+            state["citations"] = response.citations
+            state["export_artifacts"] = [artifact.model_dump(mode="json") for artifact in response.exports]
+            self._save_checkpoint(state["conversation_id"], "finalize", "completed", state)
+            return state
+
         citations = self._select_citations(state.get("citation_result", {}).get("cited_chunk_ids", []), chunks)
 
         system_prompt = (
@@ -808,7 +894,7 @@ class MultiAgentOrchestrator:
                 "answer": tool_result.get("final_answer")
                 or analytical_result.get("analysis")
                 or doc_result.get("summary")
-                or "I could not find enough reliable support in the documents to answer that.",
+                or self._unsupported_answer_text(),
                 "grounded": grounded,
                 "confidence": min(
                     float(state.get("citation_result", {}).get("confidence", 0.0)),
@@ -821,7 +907,7 @@ class MultiAgentOrchestrator:
         response = ChatResponse(
             conversation_id=UUID(state["conversation_id"]),
             answer=str(final_result.get("answer", "")).strip()
-            or "I could not find enough reliable support in the documents to answer that.",
+            or self._unsupported_answer_text(),
             grounded=grounded,
             confidence=max(0.0, min(float(final_result.get("confidence", 0.0)), 1.0)),
             answer_mode="grounded" if grounded else "insufficient_context",
@@ -1093,28 +1179,23 @@ class MultiAgentOrchestrator:
             )
             for chunk in retrieved_chunks[:2]
         ]
-        answer = (
-            trim_excerpt(retrieved_chunks[0].content, 400)
-            if retrieved_chunks
-            else "I could not find enough reliable support in the documents to answer that."
-        )
+        support = self._grounding_assessment(payload.query, retrieved_chunks)
+        grounded = support.supported
+        answer = trim_excerpt(retrieved_chunks[0].content, 400) if grounded and retrieved_chunks else self._unsupported_answer_text()
         conversation = self.conversations.get_conversation(UUID(conversation_id))
         memory_hits = self.memory.semantic_search(UUID(conversation_id), payload.query)
         short_term = self.memory.load_short_term_context(conversation) if conversation is not None else {"short_term_memory": []}
         return ChatResponse(
             conversation_id=UUID(conversation_id),
             answer=answer,
-            grounded=bool(retrieved_chunks and retrieved_chunks[0].score >= self.settings.min_retrieval_score),
-            confidence=self._retrieval_confidence(retrieved_chunks[:2]),
-            answer_mode=(
-                "grounded"
-                if retrieved_chunks and retrieved_chunks[0].score >= self.settings.min_retrieval_score
-                else "insufficient_context"
-            ),
-            citations=citations if payload.include_sources else [],
+            grounded=grounded,
+            confidence=self._retrieval_confidence(retrieved_chunks[:2]) if grounded else min(self._retrieval_confidence(retrieved_chunks[:2]), 0.35),
+            answer_mode="grounded" if grounded else "insufficient_context",
+            citations=citations if grounded and payload.include_sources else [],
             retrieved_chunks=len(retrieved_chunks),
             system_notes=[
                 f"The orchestrator fell back to simpler retrieval: {error_message}",
+                *( [] if grounded else [support.reason]),
                 *([self.memory.provider.note] if self.memory.provider.note else []),
             ],
             route="fallback_retrieval",
