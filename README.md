@@ -156,7 +156,7 @@ Monitoring and model-management coverage now includes:
 
 ## Architecture Overview
 
-![Architecture overview](images/architecture_overview.png)
+![Architecture overview](images/architecture_overview.png?v=20260421)
 
 ## Docker Setup
 
