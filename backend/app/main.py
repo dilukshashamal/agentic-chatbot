@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.db.session import init_database, new_session
 from app.services.metrics import observe_http_request
 from app.services.model_management import ModelManagementService
+from app.services.tracing import TRACE_HEADER, ensure_trace_id
 
 
 @asynccontextmanager
@@ -46,8 +47,10 @@ app.add_middleware(
 async def prometheus_http_middleware(request: Request, call_next):
     started = time.perf_counter()
     response = None
+    trace_id = ensure_trace_id(request)
     try:
         response = await call_next(request)
+        response.headers[TRACE_HEADER] = trace_id
         return response
     finally:
         observe_http_request(

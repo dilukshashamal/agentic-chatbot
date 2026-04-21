@@ -35,6 +35,7 @@ class Citation(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    trace_id: str | None = None
     conversation_id: UUID
     answer: str
     grounded: bool

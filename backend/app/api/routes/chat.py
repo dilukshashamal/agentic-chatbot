@@ -1,7 +1,7 @@
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from app.models.schemas import ChatRequest, ChatResponse, ConversationDetail, Ex
 from app.services.conversations import ConversationService
 from app.services.exports import ExportService
 from app.services.orchestration import MultiAgentOrchestrator
+from app.services.tracing import get_trace_id
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -19,12 +20,13 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("/query", response_model=ChatResponse)
 async def query_chat(
     payload: ChatRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> ChatResponse:
     try:
         service = MultiAgentOrchestrator(settings, session)
-        return await run_in_threadpool(service.answer_question, payload)
+        return await run_in_threadpool(service.answer_question, payload, get_trace_id(request))
     except Exception as exc:  # pragma: no cover - thin transport layer
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

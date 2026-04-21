@@ -84,6 +84,21 @@ PROVIDER_PUBLISH_TOTAL = _counter(
     "Total external provider publish attempts.",
     ("provider", "event_type", "status"),
 )
+AGENT_RUNS_TOTAL = _counter(
+    "rag_agent_runs_total",
+    "Total multi-agent step executions.",
+    ("agent", "route", "status"),
+)
+AGENT_DURATION_SECONDS = _histogram(
+    "rag_agent_duration_seconds",
+    "Latency for multi-agent step execution.",
+    ("agent", "route", "status"),
+)
+AGENT_RETRIES_TOTAL = _counter(
+    "rag_agent_retries_total",
+    "Total retry attempts used by each multi-agent step.",
+    ("agent", "route"),
+)
 
 
 def normalize_path(path: str) -> str:
@@ -133,6 +148,15 @@ def observe_provider_publish(provider: str, event_type: str, success: bool) -> N
             event_type=event_type,
             status="success" if success else "failure",
         ).inc()
+
+
+def observe_agent_execution(agent: str, route: str, status: str, duration_seconds: float, retries: int = 0) -> None:
+    if AGENT_RUNS_TOTAL is not None:
+        AGENT_RUNS_TOTAL.labels(agent=agent, route=route, status=status).inc()
+    if AGENT_DURATION_SECONDS is not None:
+        AGENT_DURATION_SECONDS.labels(agent=agent, route=route, status=status).observe(max(duration_seconds, 0.0))
+    if retries > 0 and AGENT_RETRIES_TOTAL is not None:
+        AGENT_RETRIES_TOTAL.labels(agent=agent, route=route).inc(retries)
 
 
 def render_metrics() -> bytes:

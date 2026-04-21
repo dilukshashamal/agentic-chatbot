@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, TypedDict
 from uuid import UUID
+from uuid import uuid4
 
 import requests
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -22,9 +23,10 @@ from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.exports import ExportService
 from app.services.grounding import GroundingAssessment, assess_grounding_support
 from app.services.memory import MemoryService
-from app.services.metrics import observe_query
+from app.services.metrics import observe_agent_execution, observe_query
 from app.services.model_management import ModelManagementService, RuntimeModelProfile
 from app.services.retrieval import PgVectorRetriever
+from app.services.tracing import emit_trace_event
 
 try:  # pragma: no cover - optional dependency
     import matplotlib
@@ -57,6 +59,7 @@ except ImportError:  # pragma: no cover - graceful fallback for environments wit
 
 
 class AgentState(TypedDict, total=False):
+    trace_id: str
     conversation_id: str
     document_id: str | None
     question: str
@@ -226,6 +229,10 @@ class MultiAgentOrchestrator:
             }
         )
 
+    @staticmethod
+    def _trace_id(state: AgentState) -> str:
+        return state.get("trace_id") or ""
+
     def _checkpoint_payload(self, state: AgentState) -> dict[str, Any]:
         return {
             "conversation_id": state.get("conversation_id"),
@@ -370,14 +377,42 @@ class MultiAgentOrchestrator:
     def _run_with_retry(self, agent_name: str, state: AgentState, fn) -> AgentState:
         last_error: Exception | None = None
         for attempt in range(self.settings.max_agent_retries + 1):
+            started = time.perf_counter()
             try:
                 result = fn(state)
+                route = result.get("route", state.get("route", "unknown"))
+                duration = max(time.perf_counter() - started, 0.0)
+                observe_agent_execution(agent=agent_name, route=route, status="completed", duration_seconds=duration, retries=attempt)
+                emit_trace_event(
+                    "agent_step",
+                    trace_id=self._trace_id(result),
+                    conversation_id=result.get("conversation_id"),
+                    agent=agent_name,
+                    route=route,
+                    status="completed",
+                    retries=attempt,
+                    duration_ms=round(duration * 1000.0, 2),
+                )
                 self._append_trace(result, agent_name, "completed", f"{agent_name} completed.", retries=attempt)
                 self._save_checkpoint(result["conversation_id"], agent_name, "completed", result)
                 return result
             except Exception as exc:
                 last_error = exc
+                duration = max(time.perf_counter() - started, 0.0)
                 if attempt >= self.settings.max_agent_retries:
+                    route = state.get("route", "unknown")
+                    observe_agent_execution(agent=agent_name, route=route, status="fallback", duration_seconds=duration, retries=attempt)
+                    emit_trace_event(
+                        "agent_step",
+                        trace_id=self._trace_id(state),
+                        conversation_id=state.get("conversation_id"),
+                        agent=agent_name,
+                        route=route,
+                        status="fallback",
+                        retries=attempt,
+                        duration_ms=round(duration * 1000.0, 2),
+                        error=str(exc),
+                    )
                     state.setdefault("system_notes", []).append(
                         f"{agent_name} failed and fallback mode was used: {exc}"
                     )
@@ -1153,6 +1188,7 @@ class MultiAgentOrchestrator:
         conversation_id: str,
         error_message: str,
         runtime_profile: RuntimeModelProfile | None = None,
+        trace_id: str | None = None,
     ) -> ChatResponse:
         active_profile = runtime_profile or RuntimeModelProfile(
             chat_model=self.settings.chat_model,
@@ -1186,6 +1222,7 @@ class MultiAgentOrchestrator:
         memory_hits = self.memory.semantic_search(UUID(conversation_id), payload.query)
         short_term = self.memory.load_short_term_context(conversation) if conversation is not None else {"short_term_memory": []}
         return ChatResponse(
+            trace_id=trace_id,
             conversation_id=UUID(conversation_id),
             answer=answer,
             grounded=grounded,
@@ -1215,13 +1252,21 @@ class MultiAgentOrchestrator:
             exports=[],
         )
 
-    def answer_question(self, payload: ChatRequest) -> ChatResponse:
+    def answer_question(self, payload: ChatRequest, trace_id: str | None = None) -> ChatResponse:
         started_at = time.perf_counter()
+        active_trace_id = trace_id or str(uuid4())
         conversation = self.conversations.get_or_create_conversation(payload.conversation_id, payload.user_preferences)
+        emit_trace_event(
+            "query_started",
+            trace_id=active_trace_id,
+            conversation_id=str(conversation.id),
+            has_document_scope=bool(payload.document_id),
+            top_k=payload.top_k,
+        )
         runtime_profile = self.model_management.runtime_profile(str(conversation.id))
         command_response = self._handle_memory_command(conversation, payload, {})
         if command_response is not None:
-            persisted = self._persist_response(command_response, payload, [])
+            persisted = self._persist_response(command_response.model_copy(update={"trace_id": active_trace_id}), payload, [])
             self._log_query_experiment(
                 response=persisted,
                 payload=payload,
@@ -1229,10 +1274,20 @@ class MultiAgentOrchestrator:
                 runtime_profile=runtime_profile,
                 latency_ms=(time.perf_counter() - started_at) * 1000.0,
             )
+            emit_trace_event(
+                "query_completed",
+                trace_id=active_trace_id,
+                conversation_id=str(conversation.id),
+                route=persisted.route,
+                answer_mode=persisted.answer_mode,
+                grounded=persisted.grounded,
+                latency_ms=round((time.perf_counter() - started_at) * 1000.0, 2),
+            )
             return persisted
 
         self._validate_document_scope(payload)
         state: AgentState = {
+            "trace_id": active_trace_id,
             "conversation_id": str(conversation.id),
             "document_id": str(payload.document_id) if payload.document_id else None,
             "question": payload.query,
@@ -1276,14 +1331,31 @@ class MultiAgentOrchestrator:
             response = final_state["response"]
             retrieved_chunks = final_state.get("retrieved_chunks", [])
         except Exception as exc:
-            response = self._simple_retrieval_response(payload, str(conversation.id), str(exc), runtime_profile)
+            response = self._simple_retrieval_response(
+                payload,
+                str(conversation.id),
+                str(exc),
+                runtime_profile,
+                active_trace_id,
+            )
 
-        persisted = self._persist_response(response, payload, retrieved_chunks)
+        persisted = self._persist_response(response.model_copy(update={"trace_id": active_trace_id}), payload, retrieved_chunks)
         self._log_query_experiment(
             response=persisted,
             payload=payload,
             retrieved_chunks=retrieved_chunks,
             runtime_profile=runtime_profile,
             latency_ms=(time.perf_counter() - started_at) * 1000.0,
+        )
+        emit_trace_event(
+            "query_completed",
+            trace_id=active_trace_id,
+            conversation_id=str(conversation.id),
+            route=persisted.route,
+            answer_mode=persisted.answer_mode,
+            grounded=persisted.grounded,
+            citations=len(persisted.citations),
+            retrieved_chunks=len(retrieved_chunks),
+            latency_ms=round((time.perf_counter() - started_at) * 1000.0, 2),
         )
         return persisted
