@@ -156,12 +156,7 @@ Monitoring and model-management coverage now includes:
 
 ## Architecture Overview
 
-```text
-User -> Frontend -> Backend API -> Router / Memory / Document / Analysis / Citation / Tool agents
-                                   -> Retrieval + pgvector / Postgres
-                                   -> Model management + experiment logging
-                                   -> Metrics / MLflow / Prometheus / Grafana
-```
+![Architecture overview](images/architecture_overview.png)
 
 ## Docker Setup
 
