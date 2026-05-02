@@ -35,15 +35,15 @@ def new_session() -> Session:
     return _get_session_factory()()
 
 
-def _alembic_config() -> Config:
+def _alembic_config(settings: Settings | None = None) -> Config:
     backend_root = Path(__file__).resolve().parents[2]
     config = Config(str(backend_root / "alembic.ini"))
     config.set_main_option("script_location", str(backend_root / "alembic"))
-    config.set_main_option("sqlalchemy.url", get_settings().database_url)
+    chosen_settings = settings or get_settings()
+    config.set_main_option("sqlalchemy.url", chosen_settings.database_url.replace("%", "%%"))
     return config
 
 
 def init_database(settings: Settings | None = None) -> None:
     """Apply pending Alembic migrations during startup."""
-    _ = settings
-    command.upgrade(_alembic_config(), "head")
+    command.upgrade(_alembic_config(settings), "head")
