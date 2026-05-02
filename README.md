@@ -344,13 +344,6 @@ Optional memory-provider environment variables:
 
 If one of these is missing, the backend falls back to a simpler path where possible.
 
-## Suggested Next Improvements
-
-- add Alembic migrations instead of relying on startup table creation
-- add automated backend tests for conversation persistence and agent fallbacks
-- expose agent traces and export actions more directly in the frontend
-- retire the legacy prototype files once the new stack fully replaces them
-
 ## Legacy Prototype
 
 The original Streamlit prototype is intentionally retained as `legacy_streamlit_app.py` for reference/testing of the early single-PDF flow. It is not part of the production FastAPI + Next.js deployment path.
