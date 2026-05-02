@@ -203,6 +203,17 @@ If you recently pulled changes that added new tables or dependencies, rebuild th
 docker compose up --build backend
 ```
 
+### 2.5 Run backend migrations (Alembic)
+
+Before starting the backend for the first time (or after pulling schema changes), run:
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+The backend startup also attempts to apply pending migrations automatically, but running this command explicitly is recommended for production rollouts.
+
 ### 3. Monitoring Defaults
 
 Optional additions to the root `.env`:
@@ -312,7 +323,7 @@ The chat response now also includes memory-related fields such as:
 - additive compatibility migrations run on startup for recently introduced columns on existing tables
 - `pgvector` is the active vector store for the current app
 - conversation memory, semantic summaries, graph nodes, and document access history are persisted in Postgres
-- the legacy notebook and `app.py` remain in the repo as prototype history
+- the legacy notebook and `legacy_streamlit_app.py` remain in the repo as prototype history
 
 ## Optional Dependencies
 
@@ -339,3 +350,8 @@ If one of these is missing, the backend falls back to a simpler path where possi
 - add automated backend tests for conversation persistence and agent fallbacks
 - expose agent traces and export actions more directly in the frontend
 - retire the legacy prototype files once the new stack fully replaces them
+
+## Legacy Prototype
+
+The original Streamlit prototype is intentionally retained as `legacy_streamlit_app.py` for reference/testing of the early single-PDF flow. It is not part of the production FastAPI + Next.js deployment path.
+

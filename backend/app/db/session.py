@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Iterator
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -32,7 +35,15 @@ def new_session() -> Session:
     return _get_session_factory()()
 
 
+def _alembic_config() -> Config:
+    backend_root = Path(__file__).resolve().parents[2]
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_root / "alembic"))
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
+    return config
+
+
 def init_database(settings: Settings | None = None) -> None:
-    """Database schema is managed via Alembic migrations."""
+    """Apply pending Alembic migrations during startup."""
     _ = settings
-    return None
+    command.upgrade(_alembic_config(), "head")
