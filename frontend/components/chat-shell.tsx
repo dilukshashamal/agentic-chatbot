@@ -542,6 +542,19 @@ export function ChatShell() {
 
                         <p className="msg-answer">{msg.content}</p>
 
+                        {msg.response?.trace_id || msg.response?.exports?.length || msg.response?.agent_trace?.length ? (
+                          <details>
+                            <summary className="citations-toggle">
+                              Debug & exports
+                            </summary>
+                            <div className="citations-grid">
+                              {msg.response?.trace_id ? <div className="citation-card"><strong>Trace ID:</strong> {msg.response.trace_id}</div> : null}
+                              {msg.response?.agent_trace?.length ? <div className="citation-card"><strong>Agent steps:</strong> {msg.response.agent_trace.map((step) => `${step.agent} (${step.status})`).join(', ')}</div> : null}
+                              {msg.response?.exports?.length ? <div className="citation-card"><strong>Exports:</strong> {msg.response.exports.map((artifact) => `${artifact.format.toUpperCase()} @ ${artifact.path}`).join(' · ')}</div> : null}
+                            </div>
+                          </details>
+                        ) : null}
+
                         {msg.response?.citations.length ? (
                           <details>
                             <summary className="citations-toggle">
