@@ -147,5 +147,21 @@ class DocumentService:
         self.session.add(document)
         self.session.commit()
 
+    def delete_document(self, document: DocumentRecord) -> None:
+        storage_path = Path(document.storage_path) if document.storage_path else None
+        self.session.delete(document)
+        self.session.commit()
+
+        if storage_path is None:
+            return
+
+        upload_root = self.settings.upload_dir.resolve()
+        document_root = storage_path.parent.resolve()
+        if not document_root.is_relative_to(upload_root):
+            return
+
+        if document_root.exists():
+            shutil.rmtree(document_root)
+
     def _build_storage_path(self, document_id: UUID, filename: str) -> Path:
         return self.settings.upload_dir / str(document_id) / filename

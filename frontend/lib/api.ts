@@ -176,3 +176,17 @@ export async function rebuildIndex(
 
   return handleResponse<{ message: string; chunk_count: number }>(response);
 }
+
+export async function deleteDocument(
+  documentId: string,
+  adminToken: string,
+): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  return handleResponse<{ message: string }>(response);
+}

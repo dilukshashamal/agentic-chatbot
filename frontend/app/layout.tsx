@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Synkora AI — Document Intelligence",
-  description:
-    "Ask questions across your uploaded PDFs with grounded, citation-backed answers.",
+  title: "Synkora AI - Legal Consultation",
+  description: "Prepare clear, private legal consultation summaries and first-step guidance.",
 };
 
 export default function RootLayout({

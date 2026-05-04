@@ -1379,7 +1379,7 @@ details[open] .citations-toggle {
 
 .admin-table-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 120px 170px 100px;
+  grid-template-columns: minmax(220px, 1fr) 120px 170px 170px;
   align-items: center;
   gap: 14px;
   min-height: 68px;
@@ -1432,8 +1432,122 @@ details[open] .citations-toggle {
   font-size: 12px;
 }
 
+.admin-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .admin-reindex-btn {
   justify-self: end;
+}
+
+.admin-danger-btn {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border: 1px solid rgba(185, 28, 28, 0.28);
+  border-radius: var(--radius-sm);
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 600;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+
+.admin-danger-btn:hover {
+  border-color: #b91c1c;
+  background: #fce8e6;
+}
+
+.admin-danger-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.admin-danger-btn--solid {
+  min-height: 40px;
+  padding: 0 16px;
+  border-color: #b91c1c;
+  border-radius: var(--radius-full);
+  background: #b91c1c;
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.admin-danger-btn--solid:hover {
+  background: #991b1b;
+  color: #ffffff;
+}
+
+.admin-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.52);
+}
+
+.admin-confirm-modal {
+  width: min(100%, 480px);
+  padding: 24px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.admin-confirm-modal h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #001f3f;
+  font-size: 24px;
+  line-height: 1.3;
+  margin-bottom: 8px;
+}
+
+.admin-confirm-modal p {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.admin-delete-target {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.admin-delete-target svg {
+  width: 32px;
+  height: 32px;
+  padding: 7px;
+  border-radius: var(--radius-sm);
+  background: var(--red-light);
+  color: var(--red);
+  flex-shrink: 0;
+}
+
+.admin-delete-target span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.admin-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 @media (max-width: 760px) {
@@ -1459,7 +1573,439 @@ details[open] .citations-toggle {
     gap: 8px;
   }
 
-  .admin-reindex-btn {
-    justify-self: start;
+  .admin-row-actions {
+    justify-content: flex-start;
+  }
+
+  .admin-modal-actions {
+    flex-direction: column-reverse;
+  }
+}
+
+/* Legal consultation */
+
+.consult-root {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(0, 31, 63, 0.035), transparent 340px),
+    #f7f8fa;
+  color: #1f2937;
+}
+
+.consult-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 64px;
+  padding: 0 24px;
+  border-bottom: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+}
+
+.consult-logo-link {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.consult-nav-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.consult-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.consult-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d97706;
+}
+
+.consult-status.is-ready::before {
+  background: #2d7f3e;
+}
+
+.consult-main {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr);
+  gap: 28px;
+  padding: 36px 0 44px;
+}
+
+.consult-intake,
+.consult-conversation {
+  min-width: 0;
+}
+
+.consult-hero {
+  padding: 8px 0 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.consult-eyebrow {
+  margin-bottom: 8px;
+  color: #003366;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.consult-hero h1,
+.consult-response-head h2,
+.consult-empty-state h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #001f3f;
+  letter-spacing: 0;
+}
+
+.consult-hero h1 {
+  max-width: 620px;
+  font-size: clamp(34px, 5vw, 58px);
+  line-height: 1.03;
+  font-weight: 700;
+}
+
+.consult-hero p:not(.consult-eyebrow) {
+  max-width: 620px;
+  margin-top: 16px;
+  color: #4b5563;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.consult-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.consult-trust-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #dbe4ee;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #003366;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.consult-trust-row svg {
+  width: 15px;
+  height: 15px;
+}
+
+.consult-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 22px;
+  border: 1px solid #dbe4ee;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.consult-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.consult-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.consult-field input,
+.consult-field select,
+.consult-field textarea,
+.consult-followup-box textarea {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #111827;
+  outline: none;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+
+.consult-field input,
+.consult-field select {
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.consult-field textarea {
+  min-height: 142px;
+  max-height: 220px;
+  padding: 12px;
+  resize: none;
+  line-height: 1.55;
+}
+
+.consult-field input:focus,
+.consult-field select:focus,
+.consult-field textarea:focus,
+.consult-followup-box textarea:focus {
+  border-color: #003366;
+  box-shadow: 0 0 0 3px rgba(0, 51, 102, 0.12);
+}
+
+.consult-form-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 4px;
+}
+
+.consult-form-footer p {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.consult-primary-btn {
+  min-height: 44px;
+  min-width: 168px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border-radius: 3px;
+  background: #003366;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  transition:
+    background 0.12s,
+    box-shadow 0.12s;
+}
+
+.consult-primary-btn:hover {
+  background: #001f3f;
+  box-shadow: 0 2px 8px rgba(0, 51, 102, 0.18);
+}
+
+.consult-primary-btn:disabled {
+  background: #9ca3af;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.consult-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.consult-starters button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #003366;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.consult-starters button:hover {
+  border-color: #0088cc;
+  background: #e8f2ff;
+}
+
+.consult-conversation {
+  position: sticky;
+  top: 88px;
+  height: calc(100vh - 124px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #dbe4ee;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.consult-response-head {
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.consult-response-head h2 {
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.consult-confidence {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 3px;
+  background: #e8f2ff;
+  color: #003366;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.consult-response-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.consult-empty-state {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.consult-empty-state svg {
+  width: 46px;
+  height: 46px;
+  color: #003366;
+}
+
+.consult-empty-state h3 {
+  font-size: 22px;
+}
+
+.consult-empty-state p {
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+.consult-messages {
+  max-width: none;
+  margin: 0;
+}
+
+.consult-messages .msg-user-bubble {
+  background: #003366;
+  border-radius: 12px 12px 2px 12px;
+}
+
+.consult-messages .msg-assistant-avatar {
+  background: #003366;
+}
+
+.consult-messages .msg-answer {
+  white-space: pre-wrap;
+}
+
+.consult-followup {
+  padding: 14px 16px 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.consult-followup-box {
+  display: grid;
+  grid-template-columns: 1fr 40px;
+  gap: 8px;
+  align-items: end;
+}
+
+.consult-followup-box textarea {
+  min-height: 44px;
+  max-height: 180px;
+  padding: 11px 12px;
+  resize: none;
+  line-height: 1.5;
+}
+
+.consult-inline-error {
+  margin: 14px 20px 20px;
+}
+
+@media (max-width: 980px) {
+  .consult-main {
+    grid-template-columns: 1fr;
+  }
+
+  .consult-conversation {
+    position: static;
+    height: auto;
+    min-height: 520px;
+  }
+}
+
+@media (max-width: 640px) {
+  .consult-nav {
+    padding: 0 12px;
+  }
+
+  .consult-main {
+    width: min(100% - 24px, 1180px);
+    padding-top: 22px;
+  }
+
+  .consult-nav-meta .consult-status {
+    display: none;
+  }
+
+  .consult-field-grid,
+  .consult-form-footer {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .consult-form {
+    padding: 16px;
+  }
+
+  .consult-hero h1 {
+    font-size: 34px;
+  }
+
+  .consult-response-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

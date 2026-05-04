@@ -79,3 +79,19 @@ async def reindex_document(
         page_count=document.page_count or 0,
         chunk_count=document.chunk_count or 0,
     )
+
+
+@router.delete("/{document_id}")
+def delete_document(
+    document_id: UUID,
+    _admin=Depends(require_admin),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    document_service = DocumentService(settings, session)
+    document = document_service.get_document(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    document_service.delete_document(document)
+    return {"message": "Document deleted."}

@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import logo from "../images/logo.png";
 import {
+  deleteDocument,
   DocumentSummary,
   fetchDocuments,
   fetchStatus,
@@ -95,6 +96,8 @@ export function AdminShell() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [reindexingId, setReindexingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [documentToDelete, setDocumentToDelete] = useState<DocumentSummary | null>(null);
 
   const refresh = useCallback(async () => {
     const [sys, docs] = await Promise.all([fetchStatus(), fetchDocuments()]);
@@ -191,6 +194,22 @@ export function AdminShell() {
       setError(err instanceof Error ? err.message : "Failed to reindex.");
     } finally {
       setReindexingId(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!session || !documentToDelete) return;
+
+    setDeletingId(documentToDelete.id);
+    setError(null);
+    try {
+      await deleteDocument(documentToDelete.id, session.token);
+      setDocumentToDelete(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete document.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -334,20 +353,68 @@ export function AdminShell() {
                     {formatStatus(document.status)}
                   </span>
                   <span className="admin-updated">{formatTime(document.updated_at)}</span>
-                  <button
-                    className="reindex-btn admin-reindex-btn"
-                    disabled={reindexingId === document.id}
-                    onClick={() => void handleReindex(document.id)}
-                    type="button"
-                  >
-                    {reindexingId === document.id ? "Reindexing..." : "Reindex"}
-                  </button>
+                  <div className="admin-row-actions">
+                    <button
+                      className="reindex-btn admin-reindex-btn"
+                      disabled={reindexingId === document.id || deletingId === document.id}
+                      onClick={() => void handleReindex(document.id)}
+                      type="button"
+                    >
+                      {reindexingId === document.id ? "Reindexing..." : "Reindex"}
+                    </button>
+                    <button
+                      className="admin-danger-btn"
+                      disabled={deletingId === document.id || reindexingId === document.id}
+                      onClick={() => setDocumentToDelete(document)}
+                      type="button"
+                    >
+                      {deletingId === document.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </section>
       </main>
+
+      {documentToDelete && (
+        <div className="admin-modal-backdrop" role="presentation">
+          <div
+            aria-labelledby="delete-document-title"
+            aria-modal="true"
+            className="admin-confirm-modal"
+            role="dialog"
+          >
+            <h2 id="delete-document-title">Delete document?</h2>
+            <p>
+              This will remove the uploaded PDF and its indexed chunks from the consultation knowledge base.
+            </p>
+            <div className="admin-delete-target">
+              <PdfIcon />
+              <span>{documentToDelete.file_name}</span>
+            </div>
+            <div className="admin-modal-actions">
+              <button
+                className="admin-secondary-btn"
+                disabled={deletingId === documentToDelete.id}
+                onClick={() => setDocumentToDelete(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="admin-danger-btn admin-danger-btn--solid"
+                disabled={deletingId === documentToDelete.id}
+                onClick={() => void handleDelete()}
+                type="button"
+              >
+                {deletingId === documentToDelete.id ? "Deleting..." : "Delete document"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

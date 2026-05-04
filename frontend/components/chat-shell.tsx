@@ -5,6 +5,7 @@ import {
   FormEvent,
   KeyboardEvent,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -12,14 +13,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import logo from "../images/logo.png";
-import {
-  askQuestion,
-  ChatResponse,
-  DocumentSummary,
-  fetchDocuments,
-  fetchStatus,
-  SystemStatus,
-} from "../lib/api";
+import { askQuestion, ChatResponse, fetchStatus, SystemStatus } from "../lib/api";
 
 type Message = {
   id: string;
@@ -28,138 +22,62 @@ type Message = {
   response?: ChatResponse;
 };
 
-const STARTERS = [
-  {
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-    color: "#e8f0fe",
-    iconColor: "#4285f4",
-    text: "Summarize all uploaded documents",
-  },
-  {
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <circle cx="11" cy="11" r="8" />
-        <path d="m21 21-4.35-4.35" />
-      </svg>
-    ),
-    color: "#e6f4ea",
-    iconColor: "#1e8e3e",
-    text: "What are the key topics across the files?",
-  },
-  {
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <path d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m3.343-5.657-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-      </svg>
-    ),
-    color: "#fef9e7",
-    iconColor: "#f9ab00",
-    text: "Explain the main ideas in simple terms",
-  },
+const MATTER_TYPES = [
+  "Family law",
+  "Employment",
+  "Contracts",
+  "Property",
+  "Business",
+  "Immigration",
+  "Civil dispute",
+  "Other",
 ];
 
-function formatTime(value: string): string {
-  const d = new Date(value);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffHrs = diffMs / 3600000;
-  if (diffHrs < 24) {
-    return new Intl.DateTimeFormat("en", {
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(d);
-  }
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-  }).format(d);
-}
+const URGENCY_LEVELS = ["General guidance", "This week", "Urgent deadline", "Court or agency notice"];
 
-function formatStatus(status: DocumentSummary["status"]): string {
-  const map: Record<string, string> = {
-    ready: "Ready",
-    processing: "Indexing",
-    failed: "Failed",
-    uploaded: "Queued",
-  };
-  return map[status] ?? status;
-}
+const CONSULT_STARTERS = [
+  "What should I prepare before meeting a lawyer?",
+  "Can you explain my options in plain language?",
+  "What questions should I ask during a consultation?",
+];
 
-function formatSourceSummary(response: ChatResponse): string | null {
-  const docs = new Set(response.citations.map((c) => c.source));
-  const p = response.citations.length;
-  if (p === 0) return null;
-  return `${p} source${p !== 1 ? "s" : ""} · ${docs.size} file${docs.size !== 1 ? "s" : ""}`;
-}
-
-// ─── Icons ─────────────────────────────────────────────────
 const SendIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
   </svg>
 );
 
-const AdminIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M12 2l7 4v5c0 5-3 9-7 11-4-2-7-6-7-11V6l7-4z" />
-    <path d="M9 12l2 2 4-4" />
+const ScaleIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M12 3v18M5 6h14M7 6l-4 8h8L7 6zM17 6l-4 8h8l-4-8z" />
   </svg>
 );
 
-const PdfIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <path d="M7 21H17a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-    <path d="M13 3v5a1 1 0 001 1h5" />
-    <path d="M10.5 14.5v-2h1a1 1 0 010 2h-1z" />
-    <path d="M9 12v5M13.5 12h-1v5h1a1.5 1.5 0 000-3h-1M16 12v5M16 14.5h1.5" />
+const ShieldIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M12 2 5 6v5c0 5 3 9 7 11 4-2 7-6 7-11V6l-7-4z" />
+    <path d="m9 12 2 2 4-4" />
   </svg>
 );
 
-const LibraryIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-  </svg>
-);
-
-const SourcesIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+const ClockIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
   </svg>
 );
 
 const ErrorIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
     <circle cx="12" cy="12" r="10" />
     <path d="M12 8v4M12 16h.01" />
   </svg>
 );
 
-const BrandLogo = () => (
-  <Image alt="Synkora AI" className="brand-logo-image" priority src={logo} />
-);
+const BrandLogo = () => <Image alt="Synkora AI" className="brand-logo-image" priority src={logo} />;
 
 const SynkoraLogo = () => (
-  <svg viewBox="0 0 18 18" fill="white" xmlns="http://www.w3.org/2000/svg">
+  <svg viewBox="0 0 18 18" fill="white" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <path
       d="M9 1.5C5.5 1.5 2.5 4.5 2.5 8c0 2 .9 3.8 2.3 5l-.8 2.5 2.5-.8C7.2 15.1 8.1 15.5 9 15.5c3.5 0 6.5-3 6.5-6.5S12.5 1.5 9 1.5z"
       opacity=".2"
@@ -168,36 +86,50 @@ const SynkoraLogo = () => (
   </svg>
 );
 
-// ─── Main Component ─────────────────────────────────────────
+function buildConsultationPrompt(values: {
+  matterType: string;
+  urgency: string;
+  jurisdiction: string;
+  summary: string;
+}): string {
+  return [
+    "Legal consultation intake:",
+    `Matter type: ${values.matterType || "Not specified"}`,
+    `Urgency: ${values.urgency || "Not specified"}`,
+    `Jurisdiction/location: ${values.jurisdiction || "Not specified"}`,
+    `Client concern: ${values.summary}`,
+    "",
+    "Give a clear first consultation response. Explain likely legal issues, practical next steps, documents or facts to prepare, and questions the client should ask an attorney. Do not claim to be a lawyer or provide a final legal opinion.",
+  ].join("\n");
+}
+
 export function ChatShell() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [matterType, setMatterType] = useState(MATTER_TYPES[0]);
+  const [urgency, setUrgency] = useState(URGENCY_LEVELS[0]);
+  const [jurisdiction, setJurisdiction] = useState("");
+  const [summary, setSummary] = useState("");
+  const [followUp, setFollowUp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const summaryRef = useRef<HTMLTextAreaElement>(null);
+  const followUpRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     let active = true;
     const refresh = async () => {
       try {
-        const [sys, docs] = await Promise.all([
-          fetchStatus(),
-          fetchDocuments(),
-        ]);
-        if (!active) return;
-        setStatus(sys);
-        setDocuments(docs);
+        const sys = await fetchStatus();
+        if (active) setStatus(sys);
       } catch (err) {
-        if (active)
-          setError(err instanceof Error ? err.message : "Failed to load.");
+        if (active) setError(err instanceof Error ? err.message : "Failed to load consultation status.");
       }
     };
     void refresh();
-    const interval = setInterval(() => void refresh(), 5000);
+    const interval = setInterval(() => void refresh(), 10000);
     return () => {
       active = false;
       clearInterval(interval);
@@ -208,32 +140,31 @@ export function ChatShell() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isPending]);
 
-  const readyCount = documents.filter((d) => d.status === "ready").length;
+  const consultationReady = (status?.ready_document_count ?? 0) > 0;
+  const latestAssistant = useMemo(() => [...messages].reverse().find((message) => message.role === "assistant"), [messages]);
 
-  const submitQuestion = (nextQuery: string) => {
-    const cleaned = nextQuery.trim();
+  const submitConsultation = (rawQuestion: string, displayText: string) => {
+    const cleaned = rawQuestion.trim();
     if (!cleaned) return;
-    if (readyCount === 0) {
-      setError("Upload and index a PDF before asking questions.");
+    if (!consultationReady) {
+      setError("The consultation knowledge base is not ready yet. Please try again shortly.");
       return;
     }
-    setError(null);
-    setQuery("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
+    setError(null);
     const userMsg: Message = {
       id: `u-${Date.now()}`,
       role: "user",
-      content: cleaned,
+      content: displayText,
     };
-    setMessages((cur) => [...cur, userMsg]);
+    setMessages((current) => [...current, userMsg]);
 
     startTransition(async () => {
       try {
         const response = await askQuestion(cleaned, conversationId);
         setConversationId(response.conversation_id);
-        setMessages((cur) => [
-          ...cur,
+        setMessages((current) => [
+          ...current,
           {
             id: `a-${Date.now()}`,
             role: "assistant",
@@ -247,343 +178,217 @@ export function ChatShell() {
     });
   };
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    submitQuestion(query);
+  const handleConsultSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const cleanedSummary = summary.trim();
+    if (cleanedSummary.length < 12) {
+      setError("Please describe your legal concern in a little more detail.");
+      return;
+    }
+
+    submitConsultation(
+      buildConsultationPrompt({
+        matterType,
+        urgency,
+        jurisdiction: jurisdiction.trim(),
+        summary: cleanedSummary,
+      }),
+      cleanedSummary,
+    );
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submitQuestion(query);
+  const handleFollowUpSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const cleaned = followUp.trim();
+    if (!cleaned) return;
+    setFollowUp("");
+    if (followUpRef.current) followUpRef.current.style.height = "auto";
+    submitConsultation(cleaned, cleaned);
+  };
+
+  const handleStarter = (starter: string) => {
+    setSummary(starter);
+    requestAnimationFrame(() => {
+      summaryRef.current?.focus();
+      if (summaryRef.current) {
+        summaryRef.current.style.height = "auto";
+        summaryRef.current.style.height = `${Math.min(summaryRef.current.scrollHeight, 220)}px`;
+      }
+    });
+  };
+
+  const handleTextareaResize = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const textarea = event.target;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
+  };
+
+  const handleFollowUpKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
     }
   };
 
-  const handleTextareaChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setQuery(e.target.value);
-    const ta = e.target;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-  };
-
   return (
-    <div className="app-root">
-      {/* ── Top Nav ── */}
-      <nav className="topnav">
-        <a className="topnav-logo" href="#" aria-label="Synkora AI home">
+    <div className="consult-root">
+      <nav className="consult-nav">
+        <Link className="consult-logo-link" href="/" aria-label="Synkora AI legal consultation">
           <div className="logo-mark logo-mark--brand">
             <BrandLogo />
           </div>
-        </a>
+        </Link>
 
-        <div className="topnav-end">
+        <div className="consult-nav-meta">
+          <span className={`consult-status ${consultationReady ? "is-ready" : ""}`}>
+            {consultationReady ? "Consultation ready" : "Preparing consultation"}
+          </span>
           <Link className="admin-nav-link" href="/admin">
             Admin
           </Link>
-          <div className="model-badge">
-            <div className="model-dot" />
-            {status?.chat_model ?? "Loading..."}
-          </div>
-          <div className="avatar">S</div>
         </div>
       </nav>
 
-      {/* ── App Body ── */}
-      <div className="app-body">
-        {/* ── Sidebar ── */}
-        <aside className="sidebar">
-          {/* Upload section */}
-          <div className="sidebar-section">
-            <Link className="admin-upload-link" href="/admin">
-              <AdminIcon />
-              Admin uploads
-            </Link>
+      <main className="consult-main">
+        <section className="consult-intake" aria-labelledby="consult-title">
+          <div className="consult-hero">
+            <p className="consult-eyebrow">Confidential legal intake</p>
+            <h1 id="consult-title">Start with a clear legal consultation.</h1>
+            <p>
+              Share the situation, deadlines, and location. Synkora organizes your concern into practical first steps for a lawyer conversation.
+            </p>
 
-            <div className="stats-row">
-              <div className="stat-card">
-                <div className="stat-value">
-                  {status?.document_count ?? documents.length}
-                </div>
-                <div className="stat-label">Total files</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-value" style={{ color: "var(--green)" }}>
-                  {readyCount}
-                </div>
-                <div className="stat-label">Ready</div>
-              </div>
+            <div className="consult-trust-row" aria-label="Consultation safeguards">
+              <span>
+                <ShieldIcon />
+                Private intake
+              </span>
+              <span>
+                <ClockIcon />
+                Deadline aware
+              </span>
+              <span>
+                <ScaleIcon />
+                Attorney-ready summary
+              </span>
             </div>
           </div>
 
-          {/* Document list */}
-          <div className="sidebar-section">
-            <div className="sidebar-label">
-              <LibraryIcon />
-              Library
-            </div>
-
-            {documents.length === 0 ? (
-              <div className="doc-empty">
-                <PdfIcon />
-                No documents yet.
-                <br />
-                Ask an admin to upload a PDF.
-              </div>
-            ) : (
-              <div className="doc-list">
-                {documents.map((doc) => (
-                  <div className="doc-item" key={doc.id}>
-                    <div className="doc-item-head">
-                      <div className="doc-icon">
-                        <PdfIcon />
-                      </div>
-                      <div className="doc-info">
-                        <div className="doc-name" title={doc.file_name}>
-                          {doc.file_name}
-                        </div>
-                        <div className="doc-meta">
-                          {doc.status === "ready"
-                            ? `${doc.page_count ?? 0} pages · ${doc.chunk_count ?? 0} chunks`
-                            : (doc.error_message ?? "Preparing...")}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="doc-footer">
-                      <span className={`status-chip status-${doc.status}`}>
-                        {formatStatus(doc.status)}
-                      </span>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          {formatTime(doc.updated_at)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </aside>
-
-        {/* ── Main Column ── */}
-        <main className="main-col">
-          {/* Context bar */}
-          <div className="context-bar">
-            <div className={`context-chip ${readyCount > 0 ? "active" : ""}`}>
-              <div className="context-chip-dot" />
-              {readyCount > 0
-                ? `Searching ${readyCount} ready file${readyCount !== 1 ? "s" : ""}`
-                : "No files ready"}
-            </div>
-            {status && (
-              <div className="context-chip">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14" />
-                </svg>
-                Hybrid retrieval
-              </div>
-            )}
-          </div>
-
-          {/* Chat area */}
-          <div className="chat-area">
-            {messages.length === 0 ? (
-              <div className="welcome-state">
-                <h1 className="welcome-title">
-                  Hello, I&apos;m <span className="blue">Synkora</span>{" "}
-                  <span className="purple">AI</span>
-                </h1>
-                <p className="welcome-sub">
-                  Ask anything about your uploaded PDFs. I search across all
-                  ready documents and cite exactly where each answer comes from.
-                </p>
-
-                <div className="starter-grid">
-                  {STARTERS.map((s, i) => (
-                    <button
-                      key={i}
-                      className="starter-card"
-                      disabled={readyCount === 0}
-                      onClick={() => submitQuestion(s.text)}
-                    >
-                      <div
-                        className="starter-card-icon"
-                        style={{ background: s.color, color: s.iconColor }}
-                      >
-                        {s.icon}
-                      </div>
-                      <span className="starter-card-text">{s.text}</span>
-                    </button>
+          <form className="consult-form" onSubmit={handleConsultSubmit}>
+            <div className="consult-field-grid">
+              <label className="consult-field">
+                <span>Matter type</span>
+                <select value={matterType} onChange={(event) => setMatterType(event.target.value)}>
+                  {MATTER_TYPES.map((item) => (
+                    <option key={item}>{item}</option>
                   ))}
-                </div>
+                </select>
+              </label>
 
-                {readyCount === 0 && (
-                  <div
-                    style={{
-                      padding: "16px 20px",
-                      background: "var(--surface)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-xl)",
-                      fontSize: "14px",
-                      color: "var(--text-secondary)",
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    <strong style={{ color: "var(--text-primary)" }}>
-                      Get started
-                    </strong>
-                    <br />
-                    Upload a PDF using the sidebar. Once indexing completes, the
-                    starter prompts will unlock and you can begin chatting.
-                  </div>
-                )}
+              <label className="consult-field">
+                <span>Urgency</span>
+                <select value={urgency} onChange={(event) => setUrgency(event.target.value)}>
+                  {URGENCY_LEVELS.map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="consult-field">
+              <span>Jurisdiction or location</span>
+              <input
+                value={jurisdiction}
+                onChange={(event) => setJurisdiction(event.target.value)}
+                placeholder="Example: Colombo, Sri Lanka or California, USA"
+              />
+            </label>
+
+            <label className="consult-field">
+              <span>What happened?</span>
+              <textarea
+                ref={summaryRef}
+                value={summary}
+                onChange={(event) => {
+                  setSummary(event.target.value);
+                  handleTextareaResize(event);
+                }}
+                placeholder="Describe the issue, dates, parties involved, notices received, and what outcome you want."
+                rows={5}
+              />
+            </label>
+
+            <div className="consult-form-footer">
+              <button className="consult-primary-btn" disabled={isPending || !summary.trim()} type="submit">
+                {isPending && messages.length === 0 ? "Preparing..." : "Start consultation"}
+              </button>
+              <p>This is general information for consultation prep, not a final legal opinion.</p>
+            </div>
+          </form>
+
+          <div className="consult-starters" aria-label="Example consultation prompts">
+            {CONSULT_STARTERS.map((starter) => (
+              <button key={starter} onClick={() => handleStarter(starter)} type="button">
+                {starter}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="consult-conversation" aria-label="Consultation response">
+          <div className="consult-response-head">
+            <div>
+              <p className="consult-eyebrow">Consultation workspace</p>
+              <h2>{latestAssistant ? "Response" : "Your guidance will appear here"}</h2>
+            </div>
+            {latestAssistant?.response && (
+              <span className="consult-confidence">
+                {Math.round(latestAssistant.response.confidence * 100)}% confidence
+              </span>
+            )}
+          </div>
+
+          <div className="consult-response-body">
+            {messages.length === 0 ? (
+              <div className="consult-empty-state">
+                <ScaleIcon />
+                <h3>Tell us the facts first.</h3>
+                <p>
+                  A focused intake helps separate deadlines, evidence, parties, and likely next steps before a lawyer reviews the matter.
+                </p>
               </div>
             ) : (
-              <div className="messages">
-                {messages.map((msg) => {
-                  if (msg.role === "user") {
-                    return (
-                      <div className="msg-user" key={msg.id}>
-                        <div className="msg-user-bubble">{msg.content}</div>
-                      </div>
-                    );
-                  }
-
-                  const sourceSummary = msg.response
-                    ? formatSourceSummary(msg.response)
-                    : null;
-                  return (
-                    <div className="msg-assistant" key={msg.id}>
+              <div className="messages consult-messages">
+                {messages.map((message) =>
+                  message.role === "user" ? (
+                    <div className="msg-user" key={message.id}>
+                      <div className="msg-user-bubble">{message.content}</div>
+                    </div>
+                  ) : (
+                    <div className="msg-assistant" key={message.id}>
                       <div className="msg-assistant-avatar">
                         <SynkoraLogo />
                       </div>
                       <div className="msg-assistant-body">
-                        {msg.response && (
+                        {message.response && (
                           <div className="msg-chips">
-                            <span className="msg-chip chip-confidence">
-                              {Math.round(msg.response.confidence * 100)}%
-                              confidence
+                            <span className={`msg-chip ${message.response.grounded ? "chip-grounded" : "chip-ungrounded"}`}>
+                              {message.response.grounded ? "Knowledge-base supported" : "Needs attorney review"}
                             </span>
-                            <span
-                              className={`msg-chip ${msg.response.grounded ? "chip-grounded" : "chip-ungrounded"}`}
-                            >
-                              {msg.response.grounded
-                                ? "Grounded"
-                                : "Insufficient context"}
-                            </span>
-                            {sourceSummary && (
-                              <span className="msg-chip chip-sources">
-                                {sourceSummary}
-                              </span>
-                            )}
                           </div>
                         )}
-
-                        <p className="msg-answer">{msg.content}</p>
-
-                        {msg.response?.trace_id ||
-                        msg.response?.exports?.length ||
-                        msg.response?.agent_trace?.length ? (
-                          <details>
-                            <summary className="citations-toggle">
-                              Debug & exports
-                            </summary>
-                            <div className="citations-grid">
-                              {msg.response?.trace_id ? (
-                                <div className="citation-card">
-                                  <strong>Trace ID:</strong>{" "}
-                                  {msg.response.trace_id}
-                                </div>
-                              ) : null}
-                              {msg.response?.agent_trace?.length ? (
-                                <div className="citation-card">
-                                  <strong>Agent steps:</strong>{" "}
-                                  {msg.response.agent_trace
-                                    .map(
-                                      (step) =>
-                                        `${step.agent} (${step.status})`,
-                                    )
-                                    .join(", ")}
-                                </div>
-                              ) : null}
-                              {msg.response?.exports?.length ? (
-                                <div className="citation-card">
-                                  <strong>Exports:</strong>{" "}
-                                  {msg.response.exports
-                                    .map(
-                                      (artifact) =>
-                                        `${artifact.format.toUpperCase()} @ ${artifact.path}`,
-                                    )
-                                    .join(" · ")}
-                                </div>
-                              ) : null}
-                            </div>
-                          </details>
-                        ) : null}
-
-                        {msg.response?.citations.length ? (
-                          <details>
-                            <summary className="citations-toggle">
-                              <SourcesIcon />
-                              View {msg.response.citations.length} supporting
-                              source
-                              {msg.response.citations.length !== 1 ? "s" : ""}
-                            </summary>
-                            <div className="citations-grid">
-                              {msg.response.citations.map((c) => (
-                                <div className="citation-card" key={c.chunk_id}>
-                                  <div className="citation-head">
-                                    <span
-                                      className="citation-source"
-                                      title={c.source}
-                                    >
-                                      {c.source}
-                                    </span>
-                                    {c.page && (
-                                      <span className="citation-page">
-                                        p.{c.page}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="citation-score">
-                                    Score {Math.round(c.score * 100)}%
-                                  </div>
-                                  <p className="citation-excerpt">
-                                    {c.excerpt}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          </details>
-                        ) : null}
+                        <p className="msg-answer">{message.content}</p>
                       </div>
                     </div>
-                  );
-                })}
+                  ),
+                )}
 
                 {isPending && (
                   <div className="msg-pending msg-assistant">
                     <div className="msg-assistant-avatar">
                       <SynkoraLogo />
                     </div>
-                    <div className="typing-indicator">
+                    <div className="typing-indicator" aria-label="Preparing response">
                       <div className="typing-dot" />
                       <div className="typing-dot" />
                       <div className="typing-dot" />
@@ -595,63 +400,43 @@ export function ChatShell() {
             )}
           </div>
 
-          {/* Composer */}
-          <div className="composer-area">
-            <div className="composer-wrap">
+          {messages.length > 0 && (
+            <form className="consult-followup" onSubmit={handleFollowUpSubmit}>
               {error && (
                 <div className="error-banner">
                   <ErrorIcon />
                   {error}
                 </div>
               )}
-              <form onSubmit={handleSubmit}>
-                <div className="composer-box">
-                  <textarea
-                    ref={textareaRef}
-                    className="composer-textarea"
-                    value={query}
-                    onChange={handleTextareaChange}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Ask a question about your documents..."
-                    rows={1}
-                    aria-label="Ask a question"
-                  />
-                  <div className="composer-footer">
-                    <div className="composer-tools">
-                      <button
-                        className="composer-tool-btn"
-                        type="button"
-                        title="Attach file"
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                        </svg>
-                      </button>
-                    </div>
-                    <button
-                      className="send-btn"
-                      type="submit"
-                      disabled={isPending || !query.trim() || readyCount === 0}
-                      title="Send"
-                    >
-                      <SendIcon />
-                    </button>
-                  </div>
-                </div>
-                <p className="composer-hint">
-                  Press Enter to send · Shift+Enter for new line · Answers are
-                  grounded in your PDFs
-                </p>
-              </form>
+              <div className="consult-followup-box">
+                <textarea
+                  ref={followUpRef}
+                  value={followUp}
+                  onChange={(event) => {
+                    setFollowUp(event.target.value);
+                    handleTextareaResize(event);
+                  }}
+                  onKeyDown={handleFollowUpKeyDown}
+                  placeholder="Ask a follow-up about deadlines, evidence, risks, or next steps..."
+                  rows={1}
+                  aria-label="Ask a follow-up question"
+                />
+                <button className="send-btn" disabled={isPending || !followUp.trim()} type="submit" title="Send">
+                  <SendIcon />
+                </button>
+              </div>
+              <p className="composer-hint">Press Enter to send. Shift+Enter for a new line.</p>
+            </form>
+          )}
+
+          {messages.length === 0 && error && (
+            <div className="error-banner consult-inline-error">
+              <ErrorIcon />
+              {error}
             </div>
-          </div>
-        </main>
-      </div>
+          )}
+        </section>
+      </main>
     </div>
   );
 }
