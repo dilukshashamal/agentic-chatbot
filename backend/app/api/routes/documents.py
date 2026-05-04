@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.admin_auth import require_admin
 from app.core.config import Settings, get_settings
 from app.db.session import get_db_session, new_session
 from app.models.schemas import BuildIndexResponse, DocumentSummary, DocumentUploadResponse
@@ -36,6 +37,7 @@ def list_documents(session: Session = Depends(get_db_session)) -> list[DocumentS
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     background_tasks: BackgroundTasks,
+    _admin=Depends(require_admin),
     file: UploadFile = File(...),
     session: Session = Depends(get_db_session),
 ) -> DocumentUploadResponse:
@@ -60,6 +62,7 @@ async def upload_document(
 async def reindex_document(
     document_id: UUID,
     background_tasks: BackgroundTasks,
+    _admin=Depends(require_admin),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> BuildIndexResponse:

@@ -8,6 +8,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 ExportFormat = Literal["json", "pdf", "docx"]
 
 
+class AdminLoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class AdminLoginResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int = Field(gt=0)
+
+
 class ChatRequest(BaseModel):
     conversation_id: UUID | None = None
     document_id: UUID | None = None

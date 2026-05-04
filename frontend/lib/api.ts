@@ -56,6 +56,12 @@ export type ChatResponse = {
   }>;
 };
 
+export type AdminSession = {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+};
+
 export type SystemStatus = {
   status: "ok";
   api_name: string;
@@ -96,12 +102,41 @@ export async function fetchDocuments(): Promise<DocumentSummary[]> {
   return handleResponse<DocumentSummary[]>(response);
 }
 
-export async function uploadDocument(file: File): Promise<{ message: string; document: DocumentSummary }> {
+export async function loginAdmin(username: string, password: string): Promise<AdminSession> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/admin/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ username, password }),
+  });
+
+  return handleResponse<AdminSession>(response);
+}
+
+export async function verifyAdminSession(token: string): Promise<{ status: "ok" }> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/admin/session`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  return handleResponse<{ status: "ok" }>(response);
+}
+
+export async function uploadDocument(
+  file: File,
+  adminToken: string,
+): Promise<{ message: string; document: DocumentSummary }> {
   const body = new FormData();
   body.append("file", file);
 
   const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
     body,
   });
 
@@ -128,9 +163,15 @@ export async function askQuestion(
   return handleResponse<ChatResponse>(response);
 }
 
-export async function rebuildIndex(documentId: string): Promise<{ message: string; chunk_count: number }> {
+export async function rebuildIndex(
+  documentId: string,
+  adminToken: string,
+): Promise<{ message: string; chunk_count: number }> {
   const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/reindex`, {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
   });
 
   return handleResponse<{ message: string; chunk_count: number }>(response);

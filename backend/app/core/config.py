@@ -104,6 +104,11 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
 
+    admin_username: str = Field(default="admin", alias="ADMIN_USERNAME")
+    admin_password: str = Field(default="admin", alias="ADMIN_PASSWORD")
+    admin_session_secret: str = Field(default="change-me-admin-session-secret", alias="ADMIN_SESSION_SECRET")
+    admin_session_ttl_minutes: int = Field(default=480, ge=5, le=1440, alias="ADMIN_SESSION_TTL_MINUTES")
+
     model_config = SettingsConfigDict(
         env_file=BACKEND_ROOT / ".env",
         env_file_encoding="utf-8",

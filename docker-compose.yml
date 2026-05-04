@@ -36,6 +36,9 @@ services:
       MLFLOW_REGISTRY_URI: ${MLFLOW_REGISTRY_URI:-http://mlflow:5000}
       MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-rag-chatbot}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-change-me-admin-session-secret}
       WATCHFILES_FORCE_POLLING: "true"
       PYTHONUNBUFFERED: "1"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

@@ -10,6 +10,7 @@ import {
   useTransition,
 } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import logo from "../images/logo.png";
 import {
   askQuestion,
@@ -17,9 +18,7 @@ import {
   DocumentSummary,
   fetchDocuments,
   fetchStatus,
-  rebuildIndex,
   SystemStatus,
-  uploadDocument,
 } from "../lib/api";
 
 type Message = {
@@ -119,9 +118,10 @@ const SendIcon = () => (
   </svg>
 );
 
-const UploadIcon = () => (
+const AdminIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+    <path d="M12 2l7 4v5c0 5-3 9-7 11-4-2-7-6-7-11V6l7-4z" />
+    <path d="M9 12l2 2 4-4" />
   </svg>
 );
 
@@ -177,8 +177,6 @@ export function ChatShell() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [isUploading, setIsUploading] = useState(false);
-  const [reindexingId, setReindexingId] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -268,39 +266,6 @@ export function ChatShell() {
     ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
   };
 
-  const handleRefresh = async (documentId: string) => {
-    setReindexingId(documentId);
-    setError(null);
-    try {
-      await rebuildIndex(documentId);
-      const [sys, docs] = await Promise.all([fetchStatus(), fetchDocuments()]);
-      setStatus(sys);
-      setDocuments(docs);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to reindex.");
-    } finally {
-      setReindexingId(null);
-    }
-  };
-
-  const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setIsUploading(true);
-    setError(null);
-    try {
-      await uploadDocument(file);
-      const [sys, docs] = await Promise.all([fetchStatus(), fetchDocuments()]);
-      setStatus(sys);
-      setDocuments(docs);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
-    } finally {
-      e.target.value = "";
-      setIsUploading(false);
-    }
-  };
-
   return (
     <div className="app-root">
       {/* ── Top Nav ── */}
@@ -312,6 +277,9 @@ export function ChatShell() {
         </a>
 
         <div className="topnav-end">
+          <Link className="admin-nav-link" href="/admin">
+            Admin
+          </Link>
           <div className="model-badge">
             <div className="model-dot" />
             {status?.chat_model ?? "Loading..."}
@@ -326,17 +294,10 @@ export function ChatShell() {
         <aside className="sidebar">
           {/* Upload section */}
           <div className="sidebar-section">
-            <label className="upload-btn">
-              <UploadIcon />
-              {isUploading ? "Uploading..." : "Upload PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                className="hidden-file-input"
-                onChange={handleUpload}
-                disabled={isUploading}
-              />
-            </label>
+            <Link className="admin-upload-link" href="/admin">
+              <AdminIcon />
+              Admin uploads
+            </Link>
 
             <div className="stats-row">
               <div className="stat-card">
@@ -366,7 +327,7 @@ export function ChatShell() {
                 <PdfIcon />
                 No documents yet.
                 <br />
-                Upload a PDF to begin.
+                Ask an admin to upload a PDF.
               </div>
             ) : (
               <div className="doc-list">
@@ -406,14 +367,6 @@ export function ChatShell() {
                         >
                           {formatTime(doc.updated_at)}
                         </span>
-                        <button
-                          className="reindex-btn"
-                          disabled={reindexingId === doc.id}
-                          onClick={() => handleRefresh(doc.id)}
-                          type="button"
-                        >
-                          {reindexingId === doc.id ? "..." : "Reindex"}
-                        </button>
                       </div>
                     </div>
                   </div>
