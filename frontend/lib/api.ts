@@ -18,6 +18,7 @@ export type DocumentSummary = {
 };
 
 export type ChatResponse = {
+  trace_id?: string | null;
   conversation_id: string;
   answer: string;
   grounded: boolean;

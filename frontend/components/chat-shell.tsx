@@ -9,6 +9,8 @@ import {
   useState,
   useTransition,
 } from "react";
+import Image from "next/image";
+import logo from "../images/logo.png";
 import {
   askQuestion,
   ChatResponse,
@@ -150,6 +152,10 @@ const ErrorIcon = () => (
     <circle cx="12" cy="12" r="10" />
     <path d="M12 8v4M12 16h.01" />
   </svg>
+);
+
+const BrandLogo = () => (
+  <Image alt="Synkora AI" className="brand-logo-image" priority src={logo} />
 );
 
 const SynkoraLogo = () => (
@@ -299,13 +305,10 @@ export function ChatShell() {
     <div className="app-root">
       {/* ── Top Nav ── */}
       <nav className="topnav">
-        <a className="topnav-logo" href="#">
-          <div className="logo-mark">
-            <SynkoraLogo />
+        <a className="topnav-logo" href="#" aria-label="Synkora AI home">
+          <div className="logo-mark logo-mark--brand">
+            <BrandLogo />
           </div>
-          <span className="logo-wordmark">
-            Synkora <span>AI</span>
-          </span>
         </a>
 
         <div className="topnav-end">
@@ -542,15 +545,42 @@ export function ChatShell() {
 
                         <p className="msg-answer">{msg.content}</p>
 
-                        {msg.response?.trace_id || msg.response?.exports?.length || msg.response?.agent_trace?.length ? (
+                        {msg.response?.trace_id ||
+                        msg.response?.exports?.length ||
+                        msg.response?.agent_trace?.length ? (
                           <details>
                             <summary className="citations-toggle">
                               Debug & exports
                             </summary>
                             <div className="citations-grid">
-                              {msg.response?.trace_id ? <div className="citation-card"><strong>Trace ID:</strong> {msg.response.trace_id}</div> : null}
-                              {msg.response?.agent_trace?.length ? <div className="citation-card"><strong>Agent steps:</strong> {msg.response.agent_trace.map((step) => `${step.agent} (${step.status})`).join(', ')}</div> : null}
-                              {msg.response?.exports?.length ? <div className="citation-card"><strong>Exports:</strong> {msg.response.exports.map((artifact) => `${artifact.format.toUpperCase()} @ ${artifact.path}`).join(' · ')}</div> : null}
+                              {msg.response?.trace_id ? (
+                                <div className="citation-card">
+                                  <strong>Trace ID:</strong>{" "}
+                                  {msg.response.trace_id}
+                                </div>
+                              ) : null}
+                              {msg.response?.agent_trace?.length ? (
+                                <div className="citation-card">
+                                  <strong>Agent steps:</strong>{" "}
+                                  {msg.response.agent_trace
+                                    .map(
+                                      (step) =>
+                                        `${step.agent} (${step.status})`,
+                                    )
+                                    .join(", ")}
+                                </div>
+                              ) : null}
+                              {msg.response?.exports?.length ? (
+                                <div className="citation-card">
+                                  <strong>Exports:</strong>{" "}
+                                  {msg.response.exports
+                                    .map(
+                                      (artifact) =>
+                                        `${artifact.format.toUpperCase()} @ ${artifact.path}`,
+                                    )
+                                    .join(" · ")}
+                                </div>
+                              ) : null}
                             </div>
                           </details>
                         ) : null}
