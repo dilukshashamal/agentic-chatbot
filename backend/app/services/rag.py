@@ -15,14 +15,14 @@ from app.services.documents import RetrievedChunk, trim_excerpt
 from app.services.grounding import assess_grounding_support
 from app.services.indexing import build_index
 from app.services.model_management import ModelManagementService
-from app.services.retrieval import PgVectorRetriever
+from app.services.retrieval import build_retriever
 
 
 class RAGService:
     def __init__(self, settings: Settings, session: Session) -> None:
         self.settings = settings
         self.session = session
-        self.retriever = PgVectorRetriever(settings, session)
+        self.retriever = build_retriever(settings, session)
         self.model_management = ModelManagementService(settings, session)
         self._llm: ChatGoogleGenerativeAI | AzureChatOpenAI | None = None
         self._prompt = ChatPromptTemplate.from_messages(

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.models import DocumentRecord
+from app.services.azure_search import AzureAISearchService, azure_ai_search_enabled
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
 FILENAME_SANITIZER = re.compile(r"[^A-Za-z0-9._-]+")
@@ -149,6 +150,10 @@ class DocumentService:
 
     def delete_document(self, document: DocumentRecord) -> None:
         storage_path = Path(document.storage_path) if document.storage_path else None
+
+        if azure_ai_search_enabled(self.settings):
+            AzureAISearchService(self.settings).delete_document_chunks(document.id)
+
         self.session.delete(document)
         self.session.commit()
 

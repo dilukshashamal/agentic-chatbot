@@ -174,6 +174,7 @@ For Azure OpenAI (recommended for your current setup):
 
 ```env
 LLM_PROVIDER=azure_openai
+RETRIEVAL_BACKEND=hybrid
 AZURE_OPENAI_API_KEY=your_azure_openai_api_key
 AZURE_OPENAI_ENDPOINT=https://law-consult-openai-prod.openai.azure.com/
 AZURE_OPENAI_API_VERSION=2024-12-01-preview
@@ -182,7 +183,7 @@ AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large
 CHAT_MODEL=gpt-5.4
 EMBEDDING_MODEL=text-embedding-3-large
 
-# Optional (prepared for future Azure AI Search retriever wiring)
+# Azure AI Search (required when RETRIEVAL_BACKEND=azure_ai_search or hybrid)
 AZURE_AI_SEARCH_ENDPOINT=https://law-search-index.search.windows.net
 AZURE_AI_SEARCH_API_KEY=your_azure_ai_search_api_key
 AZURE_AI_SEARCH_INDEX_NAME=law-search-index

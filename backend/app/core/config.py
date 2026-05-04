@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     azure_ai_search_endpoint: str | None = Field(default=None, alias="AZURE_AI_SEARCH_ENDPOINT")
     azure_ai_search_api_key: str | None = Field(default=None, alias="AZURE_AI_SEARCH_API_KEY")
     azure_ai_search_index_name: str | None = Field(default=None, alias="AZURE_AI_SEARCH_INDEX_NAME")
+    retrieval_backend: Literal["pgvector", "azure_ai_search", "hybrid"] = Field(
+        default="pgvector",
+        alias="RETRIEVAL_BACKEND",
+    )
     database_url: str = Field(
         default="postgresql+psycopg://postgres:postgres@localhost:5432/rag_chatbot",
         alias="DATABASE_URL",

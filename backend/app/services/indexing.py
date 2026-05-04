@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.models import DocumentChunkRecord, DocumentRecord
+from app.services.azure_search import AzureAISearchService, azure_ai_search_enabled
 from app.services.documents import normalize_text, text_quality_score
 from app.services.metrics import observe_index
 from app.services.model_management import ModelManagementService
@@ -116,6 +117,14 @@ def build_index(settings: Settings, session: Session, document: DocumentRecord) 
         raise RuntimeError("The uploaded PDF did not produce any indexable text chunks.")
 
     embeddings = _get_embeddings(settings).embed_documents([chunk.page_content for chunk in chunks])
+
+    if azure_ai_search_enabled(settings):
+        AzureAISearchService(settings).upsert_chunks(
+            document_id=document.id,
+            source_name=document.file_name,
+            chunks=chunks,
+            embeddings=embeddings,
+        )
 
     session.execute(delete(DocumentChunkRecord).where(DocumentChunkRecord.document_id == document.id))
 

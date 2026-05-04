@@ -12,6 +12,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.model_management import router as model_management_router
 from app.core.config import get_settings
 from app.db.session import init_database, new_session
+from app.services.azure_search import validate_azure_ai_search_runtime
 from app.services.metrics import observe_http_request
 from app.services.model_management import ModelManagementService
 from app.services.tracing import TRACE_HEADER, ensure_trace_id
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     session = new_session()
     try:
         ModelManagementService(settings, session).bootstrap_defaults()
+        validate_azure_ai_search_runtime(settings)
     finally:
         session.close()
     yield

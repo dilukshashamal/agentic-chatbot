@@ -26,7 +26,7 @@ from app.services.grounding import GroundingAssessment, assess_grounding_support
 from app.services.memory import MemoryService
 from app.services.metrics import observe_agent_execution, observe_query
 from app.services.model_management import ModelManagementService, RuntimeModelProfile
-from app.services.retrieval import PgVectorRetriever
+from app.services.retrieval import build_retriever
 from app.services.tracing import emit_trace_event
 
 try:  # pragma: no cover - optional dependency
@@ -100,7 +100,7 @@ class MultiAgentOrchestrator:
     def __init__(self, settings: Settings, session: Session) -> None:
         self.settings = settings
         self.session = session
-        self.retriever = PgVectorRetriever(settings, session)
+        self.retriever = build_retriever(settings, session)
         self.conversations = ConversationService(session)
         self.exports = ExportService(settings)
         self.memory = MemoryService(settings, session)
