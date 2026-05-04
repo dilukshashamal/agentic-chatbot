@@ -111,20 +111,41 @@ def split_documents(settings: Settings, documents: list[LCDocument]) -> list[LCD
 
 def build_index(settings: Settings, session: Session, document: DocumentRecord) -> BuildIndexResult:
     started_at = time.perf_counter()
-    documents = load_pdf_documents(document)
-    chunks = split_documents(settings, documents)
+    try:
+        documents = load_pdf_documents(document)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"PDF file not found at {document.storage_path}: {exc}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load PDF: {exc}") from exc
+    
+    try:
+        chunks = split_documents(settings, documents)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to split documents into chunks: {exc}") from exc
+    
     if not chunks:
-        raise RuntimeError("The uploaded PDF did not produce any indexable text chunks.")
+        raise RuntimeError("The uploaded PDF did not produce any indexable text chunks. This may mean the PDF has no readable text or all content was filtered by quality checks.")
 
-    embeddings = _get_embeddings(settings).embed_documents([chunk.page_content for chunk in chunks])
+    try:
+        embeddings = _get_embeddings(settings).embed_documents([chunk.page_content for chunk in chunks])
+    except Exception as exc:
+        raise RuntimeError(f"Failed to generate embeddings (check LLM provider credentials): {exc}") from exc
 
     if azure_ai_search_enabled(settings):
-        AzureAISearchService(settings).upsert_chunks(
-            document_id=document.id,
-            source_name=document.file_name,
-            chunks=chunks,
-            embeddings=embeddings,
-        )
+        try:
+            AzureAISearchService(settings).upsert_chunks(
+                document_id=document.id,
+                source_name=document.file_name,
+                chunks=chunks,
+                embeddings=embeddings,
+            )
+        except Exception as exc:
+            # In hybrid mode, log warning but continue; in azure-only mode, fail hard
+            if settings.retrieval_backend == "azure_ai_search":
+                raise RuntimeError(f"Failed to upsert chunks to Azure AI Search (strict mode): {exc}") from exc
+            # Hybrid mode: continue with pgvector
+            import logging
+            logging.getLogger(__name__).warning(f"Azure AI Search upsert failed (hybrid mode, continuing with pgvector): {exc}")
 
     session.execute(delete(DocumentChunkRecord).where(DocumentChunkRecord.document_id == document.id))
 

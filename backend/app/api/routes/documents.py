@@ -1,4 +1,5 @@
 from uuid import UUID
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -11,14 +12,18 @@ from app.services.documents import DocumentService
 from app.services.rag import RAGService
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+LOGGER = logging.getLogger(__name__)
 
 
 def _index_document_in_background(document_id: UUID) -> None:
     settings = get_settings()
     session = new_session()
     try:
+        LOGGER.info(f"Starting indexing for document {document_id}")
         RAGService(settings, session).rebuild_index(document_id)
+        LOGGER.info(f"Indexing completed successfully for document {document_id}")
     except Exception as exc:
+        LOGGER.error(f"Indexing failed for document {document_id}: {exc}", exc_info=True)
         session.rollback()
         document_service = DocumentService(settings, session)
         document = document_service.get_document(document_id)
@@ -93,5 +98,11 @@ def delete_document(
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    document_service.delete_document(document)
+    try:
+        document_service.delete_document(document)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {exc}") from exc
+
     return {"message": "Document deleted."}

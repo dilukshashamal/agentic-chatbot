@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 import time
 
 from fastapi import FastAPI
@@ -17,6 +18,8 @@ from app.services.metrics import observe_http_request
 from app.services.model_management import ModelManagementService
 from app.services.tracing import TRACE_HEADER, ensure_trace_id
 
+LOGGER = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,7 +31,13 @@ async def lifespan(app: FastAPI):
     session = new_session()
     try:
         ModelManagementService(settings, session).bootstrap_defaults()
-        validate_azure_ai_search_runtime(settings)
+        try:
+            validate_azure_ai_search_runtime(settings)
+        except Exception as exc:
+            if settings.retrieval_backend == "azure_ai_search":
+                LOGGER.error("Failed to validate Azure AI Search (strict mode): %s", exc)
+                raise
+            LOGGER.warning("Azure AI Search validation failed (hybrid/fallback mode): %s. Continuing with pgvector fallback.", exc)
     finally:
         session.close()
     yield

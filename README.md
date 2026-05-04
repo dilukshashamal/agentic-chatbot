@@ -285,6 +285,79 @@ Grafana includes a starter `RAG Observability` dashboard for:
 docker compose up --build
 ```
 
+## Retrieval Backends (Best Practices)
+
+The RAG system supports three retrieval modes controlled by `RETRIEVAL_BACKEND`:
+
+### 1. PgVector (Default)
+
+- **Mode**: `RETRIEVAL_BACKEND=pgvector`
+- **Behavior**: Pure PostgreSQL vector search using `pgvector` extension.
+- **When to use**: Development, testing, or when Azure AI Search is not available.
+- **Pros**: No external dependencies, lowest latency, fully local.
+- **Cons**: No advanced ranking; similarity scoring only.
+
+### 2. Azure AI Search (Strict)
+
+- **Mode**: `RETRIEVAL_BACKEND=azure_ai_search`
+- **Behavior**: All retrieval goes through Azure AI Search; no pgvector fallback.
+- **When to use**: Production with strict Azure-only requirements.
+- **Pros**: Advanced ranking, BM25 + vector fusion, enterprise scale.
+- **Cons**: Requires valid Azure credentials at startup; fails hard if Azure is unavailable.
+- **Configuration**:
+  - `AZURE_AI_SEARCH_ENDPOINT` (required, e.g., `https://your-service.search.windows.net`)
+  - `AZURE_AI_SEARCH_API_KEY` (required)
+  - `AZURE_AI_SEARCH_INDEX_NAME` (required, e.g., `law-search-index`)
+
+### 3. Hybrid (Recommended for Production)
+
+- **Mode**: `RETRIEVAL_BACKEND=hybrid`
+- **Behavior**: Merges results from both pgvector and Azure AI Search; falls back gracefully if Azure fails.
+- **When to use**: Production deployments where resilience and quality matter most.
+- **Pros**:
+  - Best relevance through ranking fusion
+  - Automatic fallback to pgvector if Azure Search is unreachable
+  - App continues serving (with degraded quality) if Azure AI Search is down
+  - Smooth migration path (pgvector always works, Azure added incrementally)
+- **Cons**: Slightly higher indexing latency (writes to both backends); requires Azure credentials but doesn't crash if they're wrong.
+- **Best practices**:
+  - Always populate `AZURE_AI_SEARCH_ENDPOINT`, `AZURE_AI_SEARCH_API_KEY`, and `AZURE_AI_SEARCH_INDEX_NAME` in `.env`.
+  - If Azure credentials are missing or invalid, the app boots with a **warning** and uses pgvector only.
+  - Startup logs will indicate if Azure Search validation succeeded or fell back to pgvector.
+  - Monitor backend logs for `"Azure AI Search validation failed"` messages to detect credential issues.
+  - Once Azure Search is healthy, restart the backend to re-validate and activate Azure in hybrid queries.
+
+### Configuration Example (Hybrid with Fallback)
+
+```env
+LLM_PROVIDER=azure_openai
+RETRIEVAL_BACKEND=hybrid
+
+AZURE_OPENAI_API_KEY=your_key
+AZURE_OPENAI_ENDPOINT=https://your-instance.openai.azure.com/
+AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-5.4
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large
+
+# Azure AI Search (optional in hybrid; falls back to pgvector if missing or unreachable)
+AZURE_AI_SEARCH_ENDPOINT=https://your-search-service.search.windows.net
+AZURE_AI_SEARCH_API_KEY=your_search_key
+AZURE_AI_SEARCH_INDEX_NAME=law-search-index
+```
+
+### Switching Modes
+
+To switch retrieval backends without code changes:
+
+1. Update `.env` with `RETRIEVAL_BACKEND=<mode>`.
+2. Restart the backend: `docker compose restart backend` or `docker compose up --build backend`.
+3. Check startup logs for validation messages.
+
+**Migration Path**:
+
+- Start with `pgvector` to validate core functionality.
+- Move to `hybrid` once Azure Search is configured and tested.
+- Switch to `azure_ai_search` only if you need strict Azure-only enforcement for compliance.
+
 ## Local Non-Docker Setup
 
 ### Backend

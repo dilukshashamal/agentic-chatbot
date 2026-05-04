@@ -227,4 +227,9 @@ def azure_ai_search_enabled(settings: Settings) -> bool:
 def validate_azure_ai_search_runtime(settings: Settings) -> None:
     if not azure_ai_search_enabled(settings):
         return
-    AzureAISearchService(settings).ensure_index_exists()
+    try:
+        AzureAISearchService(settings).ensure_index_exists()
+    except Exception as exc:
+        if settings.retrieval_backend == "azure_ai_search":
+            raise RuntimeError(f"Critical: RETRIEVAL_BACKEND=azure_ai_search requires valid Azure AI Search setup: {exc}") from exc
+        raise
