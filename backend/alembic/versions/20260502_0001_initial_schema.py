@@ -36,6 +36,37 @@ def _uuid_column(name: str, *, nullable: bool = False) -> sa.Column:
     return sa.Column(name, postgresql.UUID(as_uuid=True), nullable=nullable)
 
 
+class _IdempotentOps:
+    """Use checkfirst for the initial migration so pre-Alembic tables do not block startup."""
+
+    def __init__(self, operations):
+        self._operations = operations
+
+    def __getattr__(self, name: str):
+        return getattr(self._operations, name)
+
+    def create_table(self, table_name: str, *columns, **kw) -> None:
+        bind = self._operations.get_bind()
+        if sa.inspect(bind).has_table(table_name, schema=kw.get("schema")):
+            return
+        self._operations.create_table(table_name, *columns, **kw)
+
+    def create_index(self, index_name: str, table_name: str, columns: list[str], *, unique: bool = False, **kw) -> None:
+        bind = self._operations.get_bind()
+        existing_indexes = sa.inspect(bind).get_indexes(table_name, schema=kw.get("schema"))
+        if any(existing_index["name"] == str(index_name) for existing_index in existing_indexes):
+            return
+        self._operations.create_index(index_name, table_name, columns, unique=unique, **kw)
+
+    def drop_table(self, table_name: str, **kw) -> None:
+        bind = self._operations.get_bind()
+        if sa.inspect(bind).has_table(table_name, schema=kw.get("schema")):
+            self._operations.drop_table(table_name, **kw)
+
+
+op = _IdempotentOps(op)
+
+
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
