@@ -2,7 +2,7 @@
 
 Synkora AI is a multi-document RAG platform for uploading PDFs, indexing them into `pgvector`, and chatting with grounded answers through a polished Next.js dashboard. The current stack now includes multi-agent orchestration, multi-level memory, model management, and built-in observability with `MLflow`, `Prometheus`, and `Grafana`.
 
-![Synkora dashboard](images/synkora_dash.png)
+![Dashboard overview](images/dashboard_img1.png)
 
 ## Highlights
 
@@ -21,7 +21,13 @@ Synkora AI is a multi-document RAG platform for uploading PDFs, indexing them in
 
 ### Main Dashboard
 
-![Main dashboard](images/frontend_interface.png)
+![Main dashboard view 1](images/dashboard_img1.png)
+
+![Main dashboard](images/dashboard_img2.png)
+
+### Admin Dashboard
+
+![Admin dashboard](images/admin_img.png)
 
 ### MLflow Tracking
 
