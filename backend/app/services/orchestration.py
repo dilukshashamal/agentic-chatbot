@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import requests
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import AzureChatOpenAI
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -104,20 +105,34 @@ class MultiAgentOrchestrator:
         self.exports = ExportService(settings)
         self.memory = MemoryService(settings, session)
         self.model_management = ModelManagementService(settings, session)
-        self._llm_cache: dict[str, ChatGoogleGenerativeAI] = {}
+        self._llm_cache: dict[str, ChatGoogleGenerativeAI | AzureChatOpenAI] = {}
         self._graph = None
         self._checkpointer = MemorySaver() if LANGGRAPH_AVAILABLE and MemorySaver is not None else None
 
-    def _get_llm(self, model_name: str | None = None) -> ChatGoogleGenerativeAI:
+    def _get_llm(self, model_name: str | None = None) -> ChatGoogleGenerativeAI | AzureChatOpenAI:
         chosen_model = model_name or self.settings.orchestration_model
         if chosen_model not in self._llm_cache:
-            if not self.settings.google_api_key:
-                raise RuntimeError("GOOGLE_API_KEY is required to query Gemini.")
-            self._llm_cache[chosen_model] = ChatGoogleGenerativeAI(
-                model=chosen_model,
-                temperature=self.settings.temperature,
-                google_api_key=self.settings.google_api_key,
-            )
+            if self.settings.llm_provider == "azure_openai":
+                if not self.settings.azure_openai_api_key:
+                    raise RuntimeError("AZURE_OPENAI_API_KEY is required to query Azure OpenAI.")
+                if not self.settings.azure_openai_endpoint:
+                    raise RuntimeError("AZURE_OPENAI_ENDPOINT is required to query Azure OpenAI.")
+                deployment = chosen_model
+                self._llm_cache[chosen_model] = AzureChatOpenAI(
+                    azure_endpoint=self.settings.azure_openai_endpoint,
+                    api_key=self.settings.azure_openai_api_key,
+                    api_version=self.settings.azure_openai_api_version,
+                    azure_deployment=deployment,
+                    temperature=self.settings.temperature,
+                )
+            else:
+                if not self.settings.google_api_key:
+                    raise RuntimeError("GOOGLE_API_KEY is required to query Gemini.")
+                self._llm_cache[chosen_model] = ChatGoogleGenerativeAI(
+                    model=chosen_model,
+                    temperature=self.settings.temperature,
+                    google_api_key=self.settings.google_api_key,
+                )
         return self._llm_cache[chosen_model]
 
     @staticmethod
@@ -330,7 +345,7 @@ class MultiAgentOrchestrator:
 
     @staticmethod
     def _unsupported_answer_text() -> str:
-        return "I could not find enough reliable support in the uploaded documents to answer that."
+        return "I could not find enough reliable support for answer that."
 
     def _select_citations(
         self,

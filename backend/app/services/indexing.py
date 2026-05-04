@@ -6,6 +6,7 @@ from uuid import UUID
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document as LCDocument
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
@@ -24,7 +25,23 @@ class BuildIndexResult:
     chunk_count: int
 
 
-def _get_embeddings(settings: Settings, model_name: str | None = None) -> GoogleGenerativeAIEmbeddings:
+def _get_embeddings(settings: Settings, model_name: str | None = None) -> GoogleGenerativeAIEmbeddings | AzureOpenAIEmbeddings:
+    if settings.llm_provider == "azure_openai":
+        if not settings.azure_openai_api_key:
+            raise RuntimeError("AZURE_OPENAI_API_KEY is required to build or query the RAG index.")
+        if not settings.azure_openai_endpoint:
+            raise RuntimeError("AZURE_OPENAI_ENDPOINT is required to build or query the RAG index.")
+
+        deployment = model_name or settings.azure_openai_embedding_deployment or settings.embedding_model
+        return AzureOpenAIEmbeddings(
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version,
+            azure_deployment=deployment,
+            model=deployment,
+            dimensions=settings.embedding_dimensions,
+        )
+
     if not settings.google_api_key:
         raise RuntimeError("GOOGLE_API_KEY is required to build or query the RAG index.")
 

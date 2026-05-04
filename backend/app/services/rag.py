@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import AzureChatOpenAI
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -23,7 +24,7 @@ class RAGService:
         self.session = session
         self.retriever = PgVectorRetriever(settings, session)
         self.model_management = ModelManagementService(settings, session)
-        self._llm: ChatGoogleGenerativeAI | None = None
+        self._llm: ChatGoogleGenerativeAI | AzureChatOpenAI | None = None
         self._prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -52,16 +53,31 @@ class RAGService:
             ]
         )
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
+    def _get_llm(self) -> ChatGoogleGenerativeAI | AzureChatOpenAI:
         if self._llm is None:
-            if not self.settings.google_api_key:
-                raise RuntimeError("GOOGLE_API_KEY is required to query Gemini.")
+            if self.settings.llm_provider == "azure_openai":
+                if not self.settings.azure_openai_api_key:
+                    raise RuntimeError("AZURE_OPENAI_API_KEY is required to query Azure OpenAI.")
+                if not self.settings.azure_openai_endpoint:
+                    raise RuntimeError("AZURE_OPENAI_ENDPOINT is required to query Azure OpenAI.")
 
-            self._llm = ChatGoogleGenerativeAI(
-                model=self.settings.chat_model,
-                temperature=self.settings.temperature,
-                google_api_key=self.settings.google_api_key,
-            )
+                deployment = self.settings.azure_openai_chat_deployment or self.settings.chat_model
+                self._llm = AzureChatOpenAI(
+                    azure_endpoint=self.settings.azure_openai_endpoint,
+                    api_key=self.settings.azure_openai_api_key,
+                    api_version=self.settings.azure_openai_api_version,
+                    azure_deployment=deployment,
+                    temperature=self.settings.temperature,
+                )
+            else:
+                if not self.settings.google_api_key:
+                    raise RuntimeError("GOOGLE_API_KEY is required to query Gemini.")
+
+                self._llm = ChatGoogleGenerativeAI(
+                    model=self.settings.chat_model,
+                    temperature=self.settings.temperature,
+                    google_api_key=self.settings.google_api_key,
+                )
         return self._llm
 
     @staticmethod
@@ -189,7 +205,7 @@ class RAGService:
     ) -> ChatResponse:
         return ChatResponse(
             conversation_id=conversation_id,
-            answer="I could not find enough reliable support in the uploaded documents to answer that.",
+            answer="I could not find enough reliable support for answer that.",
             grounded=False,
             confidence=min(self._retrieval_confidence(retrieved_chunks), 0.35),
             answer_mode="insufficient_context",

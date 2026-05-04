@@ -162,15 +162,34 @@ Monitoring and model-management coverage now includes:
 
 ### 1. Create the root `.env`
 
-Copy `.env.example` to `.env` and set your real Google API key:
+Copy `.env.example` to `.env` and set your provider-specific values.
+
+For Azure OpenAI (recommended for your current setup):
 
 ```env
-GOOGLE_API_KEY=your_google_api_key
+LLM_PROVIDER=azure_openai
+AZURE_OPENAI_API_KEY=your_azure_openai_api_key
+AZURE_OPENAI_ENDPOINT=https://law-consult-openai-prod.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-5.4
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large
+CHAT_MODEL=gpt-5.4
+EMBEDDING_MODEL=text-embedding-3-large
+
+# Optional (prepared for future Azure AI Search retriever wiring)
+AZURE_AI_SEARCH_ENDPOINT=https://law-search-index.search.windows.net
+AZURE_AI_SEARCH_API_KEY=your_azure_ai_search_api_key
+AZURE_AI_SEARCH_INDEX_NAME=law-search-index
+
 POSTGRES_DB=rag_chatbot
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_PORT=5432
 ```
+
+For Gemini, keep `LLM_PROVIDER=google` and set `GOOGLE_API_KEY`.
+
+Note: `AZURE_OPENAI_ENDPOINT` can be either the Azure OpenAI endpoint (`...openai.azure.com`) or the Cognitive Services endpoint (`...cognitiveservices.azure.com`) from Deployments + Endpoint.
 
 ### 2. Start the stack
 
@@ -347,4 +366,3 @@ If one of these is missing, the backend falls back to a simpler path where possi
 ## Legacy Prototype
 
 The original Streamlit prototype is intentionally retained as `legacy_streamlit_app.py` for reference/testing of the early single-PDF flow. It is not part of the production FastAPI + Next.js deployment path.
-

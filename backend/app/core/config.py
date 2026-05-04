@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     environment: Literal["development", "production", "test"] = "development"
 
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
+    llm_provider: Literal["google", "azure_openai"] = Field(default="google", alias="LLM_PROVIDER")
+    azure_openai_api_key: str | None = Field(default=None, alias="AZURE_OPENAI_API_KEY")
+    azure_openai_endpoint: str | None = Field(default=None, alias="AZURE_OPENAI_ENDPOINT")
+    azure_openai_api_version: str = Field(default="2024-12-01-preview", alias="AZURE_OPENAI_API_VERSION")
+    azure_openai_chat_deployment: str | None = Field(default=None, alias="AZURE_OPENAI_CHAT_DEPLOYMENT")
+    azure_openai_embedding_deployment: str | None = Field(default=None, alias="AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+
+    azure_ai_search_endpoint: str | None = Field(default=None, alias="AZURE_AI_SEARCH_ENDPOINT")
+    azure_ai_search_api_key: str | None = Field(default=None, alias="AZURE_AI_SEARCH_API_KEY")
+    azure_ai_search_index_name: str | None = Field(default=None, alias="AZURE_AI_SEARCH_INDEX_NAME")
     database_url: str = Field(
         default="postgresql+psycopg://postgres:postgres@localhost:5432/rag_chatbot",
         alias="DATABASE_URL",
