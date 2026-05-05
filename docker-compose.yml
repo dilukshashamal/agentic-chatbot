@@ -7,6 +7,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-rag_chatbot}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_INITDB_ARGS: "-c shared_buffers=256MB -c effective_cache_size=512MB"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -21,6 +22,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 
   backend:
     build:
@@ -56,13 +63,21 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-change-me-admin-session-secret}
-      WATCHFILES_FORCE_POLLING: "true"
+      WATCHFILES_FORCE_POLLING: "false"
       PYTHONUNBUFFERED: "1"
+      PYTHONOPTIMIZE: "2"
+      MALLOC_TRIM_THRESHOLD_: "128000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app/backend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
   frontend:
     build:
@@ -74,15 +89,22 @@ services:
       - backend
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-      CHOKIDAR_USEPOLLING: "true"
-      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "false"
+      WATCHPACK_POLLING: "false"
       NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: "--max-old-space-size=512"
     ports:
       - "3000:3000"
     volumes:
       - ./frontend:/app/frontend
-      - /app/frontend/node_modules
-      - /app/frontend/.next
+      - node_modules_cache:/app/frontend/node_modules
+      - next_cache:/app/frontend/.next
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   mlflow:
     build:
@@ -101,6 +123,12 @@ services:
       - "5000:5000"
     volumes:
       - mlflow_data:/mlflow
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -117,6 +145,12 @@ services:
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   grafana:
     image: grafana/grafana:11.2.0
@@ -134,9 +168,17 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
 volumes:
   postgres_data:
   mlflow_data:
   prometheus_data:
   grafana_data:
+  node_modules_cache:
+  next_cache:
