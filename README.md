@@ -108,6 +108,7 @@ If `mem0` or `zep` is selected without real provider configuration, the system s
 ```text
 rag_chatbot/
 |-- backend/
+|   |-- alembic/
 |   |-- app/
 |   |   |-- api/routes/
 |   |   |-- core/
@@ -115,6 +116,7 @@ rag_chatbot/
 |   |   |-- models/
 |   |   `-- services/
 |   |-- data/
+|   |-- tests/
 |   |-- Dockerfile
 |   `-- requirements.txt
 |-- frontend/
@@ -124,10 +126,15 @@ rag_chatbot/
 |   |-- Dockerfile
 |   `-- package.json
 |-- images/
+|-- monitoring/
+|   |-- grafana/
+|   |-- mlflow/
+|   `-- prometheus/
+|-- vectorstores/
 |-- docker-compose.yml
 |-- .env.example
 |-- rag_notebook.ipynb
-|-- app.py
+|-- legacy_streamlit_app.py
 `-- README.md
 ```
 
@@ -163,6 +170,25 @@ Monitoring and model-management coverage now includes:
 ## Architecture Overview
 
 ![Architecture overview](images/architecture_overview.png?v=20260421)
+
+## Azure Integration Deep Dive
+
+The architecture is tightly integrated with Azure's enterprise-grade AI ecosystem, allowing for advanced retrieval, model security, and high performance.
+
+### 1. Azure OpenAI (LLMs & Embeddings)
+
+The core generation and embedding operations in the orchestration layer rely heavily on **Azure OpenAI**.
+- **Chat Completions**: Used by all system agents (Router, Document Understanding, Analytical, Citation, etc.) to securely generate insights. The system routes requests via the `AZURE_OPENAI_CHAT_DEPLOYMENT` model deployment.
+- **Embeddings**: Document chunks and user queries are embedded using the `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`. This guarantees that private company data never leaves the Azure tenant.
+- **Implementation**: The backend configures `AzureChatOpenAI` and `AzureOpenAIEmbeddings` using standard enterprise authentication parameters: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION` (default `2024-12-01-preview`), and `AZURE_OPENAI_API_KEY`.
+
+### 2. Azure AI Search (Vector Store & Hybrid Retrieval)
+
+When `RETRIEVAL_BACKEND` is set to `azure_ai_search` or `hybrid`, the system delegates document indexing and semantic search to **Azure AI Search**.
+- **Index Management**: The system automatically bootstraps the required search index (defined by `AZURE_AI_SEARCH_INDEX_NAME`) using a highly tuned schema that includes exact fields for `document_id`, `chunk_id`, raw `content`, and a `content_vector`.
+- **HNSW Vector Profiling**: Under the hood, the backend configures `HnswAlgorithmConfiguration` (`hnsw-default`) ensuring low-latency, approximate nearest neighbor (ANN) retrieval across massive document datasets.
+- **Chunk Lifecycle**: During document re-indexing, the system uses compound IDs (`document_id:chunk_index`) to cleanly purge old chunks before upserting the newly embedded payloads.
+- **Score Normalization & Blending**: In the recommended `hybrid` mode, raw similarity scores returned by Azure AI Search are mathematically normalized (using `max(0.0, min(1.0, raw_score / (raw_score + 1.0)))`) so they can be smoothly blended with BM25 keyword overlaps and text quality scores. The results are merged with `pgvector` fallbacks to guarantee robust retrieval even if an Azure service goes offline.
 
 ## Docker Setup
 
