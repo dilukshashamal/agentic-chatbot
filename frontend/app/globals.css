@@ -2118,3 +2118,57 @@ details[open] .citations-toggle {
   border: none;
   display: block;
 }
+
+/* ─── Risk Table ─────────────────────────────────── */
+.risk-table-wrapper {
+  margin: 16px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.risk-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+
+.risk-table th {
+  background: var(--surface-hover);
+  padding: 12px 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--border);
+}
+
+.risk-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--text-secondary);
+}
+
+.risk-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.risk-high {
+  background: var(--red-light);
+  color: var(--red);
+}
+
+.risk-med, .risk-medium {
+  background: var(--yellow-light);
+  color: #b45309;
+}
+
+.risk-low {
+  background: var(--green-light);
+  color: var(--green);
+}

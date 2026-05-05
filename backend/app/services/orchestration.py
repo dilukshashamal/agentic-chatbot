@@ -448,6 +448,9 @@ class MultiAgentOrchestrator:
         if any(token in lowered for token in ["compare", "difference", "trend", "across", "versus"]):
             agents = ["document", "analytical"]
             route = "cross_document_analysis"
+        if any(token in lowered for token in ["review", "nda", "contract", "risk", "matrix"]):
+            agents = ["document", "analytical"]
+            route = "contract_review"
         if any(token in lowered for token in ["calculate", "sum", "average", "chart", "plot", "latest", "current"]):
             if "tool" not in agents:
                 agents.append("tool")
@@ -505,7 +508,8 @@ class MultiAgentOrchestrator:
             "You are the supervisor for a multi-agent document intelligence system. "
             "Route the query to specialist agents. Return JSON with keys: route, reasoning_mode, "
             "agents, route_reason. Allowed agent names: document, analytical, tool. "
-            "Use reasoning_mode=react only when tools or multi-step reasoning are needed."
+            "Use reasoning_mode=react only when tools or multi-step reasoning are needed. "
+            "If the user asks to review a contract, NDA, or generate a risk matrix, you MUST set route='contract_review'."
         )
         human_prompt = (
             f"Question: {state['question']}\n"
@@ -960,10 +964,19 @@ class MultiAgentOrchestrator:
 
         citations = self._select_citations(state.get("citation_result", {}).get("cited_chunk_ids", []), chunks)
 
-        system_prompt = (
-            "You are the final response agent. Create a polished answer using only the supplied evidence and tool outputs. "
-            "If confidence is low or grounding is weak, be transparent. Return JSON with keys: answer, grounded, confidence, system_notes."
-        )
+        if state.get("route") == "contract_review":
+            system_prompt = (
+                "You are the final response agent. Create a polished answer. "
+                "Because this is a contract review, the 'answer' field MUST be a stringified JSON array of objects. "
+                "Each object must have the exact keys: 'clause_name', 'risk_level' (High/Med/Low), and 'recommended_redline'. "
+                "Do not use markdown code blocks for the answer, just the raw JSON string array. "
+                "Return JSON with keys: answer, grounded, confidence, system_notes."
+            )
+        else:
+            system_prompt = (
+                "You are the final response agent. Create a polished answer using only the supplied evidence and tool outputs. "
+                "If confidence is low or grounding is weak, be transparent. Return JSON with keys: answer, grounded, confidence, system_notes."
+            )
         human_prompt = (
             f"Question: {state['question']}\n"
             f"Conversation memory: {state.get('memory_summary', 'None')}\n"

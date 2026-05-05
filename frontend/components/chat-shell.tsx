@@ -103,6 +103,18 @@ function buildConsultationPrompt(values: {
   ].join("\n");
 }
 
+function parseRiskTable(content: string) {
+  try {
+    const data = JSON.parse(content);
+    if (Array.isArray(data) && data.length > 0 && data[0].clause_name !== undefined) {
+      return data;
+    }
+  } catch (e) {
+    // Not valid JSON or our structure
+  }
+  return null;
+}
+
 export function ChatShell() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -383,7 +395,38 @@ export function ChatShell() {
                             ))}
                           </div>
                         )}
-                        <p className="msg-answer">{message.content}</p>
+                        {(() => {
+                          const tableData = parseRiskTable(message.content);
+                          if (tableData) {
+                            return (
+                              <div className="risk-table-wrapper">
+                                <table className="risk-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Clause Name</th>
+                                      <th>Risk Level</th>
+                                      <th>Recommended Redline</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {tableData.map((row: any, i: number) => (
+                                      <tr key={i}>
+                                        <td>{row.clause_name}</td>
+                                        <td>
+                                          <span className={`risk-badge risk-${(row.risk_level || "").toLowerCase()}`}>
+                                            {row.risk_level}
+                                          </span>
+                                        </td>
+                                        <td>{row.recommended_redline}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            );
+                          }
+                          return <p className="msg-answer">{message.content}</p>;
+                        })()}
                       </div>
                     </div>
                   ),
