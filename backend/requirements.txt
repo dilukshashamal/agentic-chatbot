@@ -16,6 +16,7 @@ langchain-openai
 openai
 azure-search-documents
 pypdf
+unstructured[pdf]
 requests
 beautifulsoup4
 matplotlib

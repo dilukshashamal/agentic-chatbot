@@ -3,11 +3,11 @@ from pathlib import Path
 import time
 from uuid import UUID
 
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document as LCDocument
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_openai import AzureOpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from unstructured.partition.pdf import partition_pdf
+from unstructured.chunking.title import chunk_by_title
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
@@ -52,55 +52,49 @@ def _get_embeddings(settings: Settings, model_name: str | None = None) -> Google
     )
 
 
-def load_pdf_documents(document: DocumentRecord) -> list[LCDocument]:
+def load_pdf_documents(document: DocumentRecord) -> tuple[list, int]:
     pdf_path = document.storage_path
     if not pdf_path:
         raise FileNotFoundError("Document has no stored PDF path.")
 
-    loader = PyPDFLoader(pdf_path)
-    documents = loader.load()
-
-    cleaned_documents: list[LCDocument] = []
-    for document in documents:
-        cleaned = normalize_text(document.page_content)
-        if not cleaned:
-            continue
-
-        page = document.metadata.get("page")
-        page_number = page + 1 if isinstance(page, int) else None
-        cleaned_documents.append(
-            LCDocument(
-                page_content=cleaned,
-                metadata={
-                    **document.metadata,
-                    "source": Path(pdf_path).name,
-                    "page_number": page_number,
-                },
-            )
-        )
-
-    return cleaned_documents
-
-
-def split_documents(settings: Settings, documents: list[LCDocument]) -> list[LCDocument]:
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=settings.chunk_size,
-        chunk_overlap=settings.chunk_overlap,
+    elements = partition_pdf(
+        filename=pdf_path,
+        strategy="auto",
     )
 
-    chunks = splitter.split_documents(documents)
+    page_count = 1
+    for el in elements:
+        if hasattr(el, "metadata") and hasattr(el.metadata, "page_number") and el.metadata.page_number:
+            page_count = max(page_count, el.metadata.page_number)
+
+    return elements, page_count
+
+
+def split_documents(settings: Settings, elements: list, filename: str) -> list[LCDocument]:
+    unstructured_chunks = chunk_by_title(
+        elements,
+        max_characters=settings.chunk_size,
+        overlap=settings.chunk_overlap,
+        combine_text_under_n_chars=300
+    )
+
     enriched_chunks: list[LCDocument] = []
 
-    for index, chunk in enumerate(chunks, start=1):
-        cleaned_content = normalize_text(chunk.page_content)
+    for index, chunk in enumerate(unstructured_chunks, start=1):
+        cleaned_content = normalize_text(str(chunk))
         if text_quality_score(cleaned_content) < 0.18:
             continue
+
+        page_number = None
+        if hasattr(chunk, "metadata") and hasattr(chunk.metadata, "page_number"):
+            page_number = chunk.metadata.page_number
 
         enriched_chunks.append(
             LCDocument(
                 page_content=cleaned_content,
                 metadata={
-                    **chunk.metadata,
+                    "source": filename,
+                    "page_number": page_number,
                     "chunk_id": f"chunk-{index:04d}",
                 },
             )
@@ -112,14 +106,14 @@ def split_documents(settings: Settings, documents: list[LCDocument]) -> list[LCD
 def build_index(settings: Settings, session: Session, document: DocumentRecord) -> BuildIndexResult:
     started_at = time.perf_counter()
     try:
-        documents = load_pdf_documents(document)
+        elements, page_count = load_pdf_documents(document)
     except FileNotFoundError as exc:
         raise RuntimeError(f"PDF file not found at {document.storage_path}: {exc}") from exc
     except Exception as exc:
         raise RuntimeError(f"Failed to load PDF: {exc}") from exc
     
     try:
-        chunks = split_documents(settings, documents)
+        chunks = split_documents(settings, elements, Path(document.storage_path).name)
     except Exception as exc:
         raise RuntimeError(f"Failed to split documents into chunks: {exc}") from exc
     
@@ -162,14 +156,14 @@ def build_index(settings: Settings, session: Session, document: DocumentRecord) 
 
     document.status = "ready"
     document.error_message = None
-    document.page_count = len(documents)
+    document.page_count = page_count
     document.chunk_count = len(chunks)
     session.add(document)
     session.commit()
 
     ModelManagementService(settings, session).log_index_experiment(
         document_id=document.id,
-        page_count=len(documents),
+        page_count=page_count,
         chunk_count=len(chunks),
         duration_ms=(time.perf_counter() - started_at) * 1000.0,
         metadata_json={
