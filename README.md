@@ -200,6 +200,8 @@ graph TD
     end
 ```
 
+![Architecture Diagram](images/architecture_diag.png)
+
 ## Azure Integration Deep Dive
 
 The architecture is tightly integrated with Azure's enterprise-grade AI ecosystem, allowing for advanced retrieval, model security, and high performance.
