@@ -169,7 +169,36 @@ Monitoring and model-management coverage now includes:
 
 ## Architecture Overview
 
-![Architecture overview](images/architecture_overview.png?v=20260421)
+```mermaid
+graph TD
+    User([User]) -->|HTTP| Frontend[Next.js Dashboard Port 3000]
+    Frontend -->|REST API| Backend[FastAPI Backend Port 8000]
+
+    subgraph "Multi-Agent Orchestration"
+        Backend --> Router[Router Agent]
+        Router --> DocAgent[Doc Understanding Agent]
+        Router --> AnalyticalAgent[Analytical Agent]
+        Router --> CitationAgent[Citation Agent]
+        Router --> MemoryAgent[Memory Agent]
+        Router --> ToolAgent[Tool Use Agent]
+    end
+
+    subgraph "Observability Layer"
+        Prometheus[Prometheus Port 9090] -->|Scrapes Metrics| Backend
+        Grafana[Grafana Port 3001] -->|Visualizes| Prometheus
+        Backend -->|Tracks Experiments| MLflow[MLflow Port 5000]
+    end
+
+    subgraph "Data Storage & Retrieval"
+        Backend <-->|Semantic Search| PgVector[(PostgreSQL + pgvector)]
+        Backend <-->|Hybrid Search| AzureSearch[(Azure AI Search)]
+        Backend <-->|Short/Long/Graph Memory| PostgresMemory[(PostgreSQL Memory Store)]
+    end
+
+    subgraph "Azure Ecosystem"
+        Backend <-->|Completions & Embeddings| AzureOpenAI{Azure OpenAI}
+    end
+```
 
 ## Azure Integration Deep Dive
 
