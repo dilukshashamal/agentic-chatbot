@@ -17,6 +17,9 @@ openai
 azure-search-documents
 pypdf
 unstructured[pdf]
+presidio-analyzer
+presidio-anonymizer
+spacy
 requests
 beautifulsoup4
 matplotlib

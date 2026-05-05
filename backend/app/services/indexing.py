@@ -10,6 +10,8 @@ from unstructured.partition.pdf import partition_pdf
 from unstructured.chunking.title import chunk_by_title
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
+from presidio_analyzer import AnalyzerEngine
+from presidio_anonymizer import AnonymizerEngine
 
 from app.core.config import Settings
 from app.db.models import DocumentChunkRecord, DocumentRecord
@@ -70,6 +72,28 @@ def load_pdf_documents(document: DocumentRecord) -> tuple[list, int]:
     return elements, page_count
 
 
+_analyzer = None
+_anonymizer = None
+
+def redact_pii(text: str) -> str:
+    global _analyzer, _anonymizer
+    if _analyzer is None:
+        _analyzer = AnalyzerEngine()
+    if _anonymizer is None:
+        _anonymizer = AnonymizerEngine()
+        
+    # Analyze text for specific PII entities
+    results = _analyzer.analyze(
+        text=text, 
+        entities=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "US_SSN"], 
+        language='en'
+    )
+    
+    # Anonymize findings
+    anonymized_result = _anonymizer.anonymize(text=text, analyzer_results=results)
+    return anonymized_result.text
+
+
 def split_documents(settings: Settings, elements: list, filename: str) -> list[LCDocument]:
     unstructured_chunks = chunk_by_title(
         elements,
@@ -85,13 +109,16 @@ def split_documents(settings: Settings, elements: list, filename: str) -> list[L
         if text_quality_score(cleaned_content) < 0.18:
             continue
 
+        # Redact PII before creating the document chunk
+        redacted_content = redact_pii(cleaned_content)
+
         page_number = None
         if hasattr(chunk, "metadata") and hasattr(chunk.metadata, "page_number"):
             page_number = chunk.metadata.page_number
 
         enriched_chunks.append(
             LCDocument(
-                page_content=cleaned_content,
+                page_content=redacted_content,
                 metadata={
                     "source": filename,
                     "page_number": page_number,
@@ -180,6 +207,6 @@ def build_index(settings: Settings, session: Session, document: DocumentRecord) 
 
     return BuildIndexResult(
         document_id=document.id,
-        page_count=len(documents),
+        page_count=page_count,
         chunk_count=len(chunks),
     )
