@@ -26,6 +26,7 @@ class DocumentRecord(Base):
     storage_path: Mapped[str] = mapped_column(String(1024))
     status: Mapped[str] = mapped_column(String(32), default="uploaded")
     error_message: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    allowed_groups: Mapped[list[str]] = mapped_column(JSON, default=list)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     chunk_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

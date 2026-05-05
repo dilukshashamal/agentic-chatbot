@@ -27,6 +27,7 @@ class ChatRequest(BaseModel):
     include_sources: bool = True
     export_formats: list[ExportFormat] = Field(default_factory=list, max_length=3)
     user_preferences: dict[str, str] = Field(default_factory=dict)
+    allowed_groups: list[str] = Field(default_factory=list)
 
     @field_validator("query")
     @classmethod
@@ -106,6 +107,7 @@ class DocumentSummary(BaseModel):
     page_count: int | None = None
     chunk_count: int | None = None
     error_message: str | None = None
+    allowed_groups: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

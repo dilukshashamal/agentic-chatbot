@@ -114,7 +114,7 @@ class DocumentService:
     def get_document(self, document_id: UUID) -> DocumentRecord | None:
         return self.session.get(DocumentRecord, document_id)
 
-    def create_uploaded_document(self, upload: UploadFile) -> DocumentRecord:
+    def create_uploaded_document(self, upload: UploadFile, allowed_groups: list[str] | None = None) -> DocumentRecord:
         filename = sanitize_filename(upload.filename or "document.pdf")
         if not filename.lower().endswith(".pdf"):
             raise ValueError("Only PDF uploads are supported.")
@@ -123,6 +123,7 @@ class DocumentService:
             file_name=filename,
             storage_path="",
             status="processing",
+            allowed_groups=allowed_groups or [],
         )
         self.session.add(document)
         self.session.flush()

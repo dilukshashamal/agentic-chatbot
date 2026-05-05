@@ -1,7 +1,7 @@
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.admin_auth import require_admin
@@ -44,13 +44,16 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     _admin=Depends(require_admin),
     file: UploadFile = File(...),
+    allowed_groups: str | None = Form(None),
     session: Session = Depends(get_db_session),
 ) -> DocumentUploadResponse:
     if not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported.")
 
+    groups_list = [g.strip() for g in allowed_groups.split(",")] if allowed_groups else []
+
     try:
-        document = DocumentService(get_settings(), session).create_uploaded_document(file)
+        document = DocumentService(get_settings(), session).create_uploaded_document(file, groups_list)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - transport-level fallback

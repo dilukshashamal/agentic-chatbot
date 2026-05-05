@@ -159,6 +159,7 @@ def build_index(settings: Settings, session: Session, document: DocumentRecord) 
                 source_name=document.file_name,
                 chunks=chunks,
                 embeddings=embeddings,
+                allowed_groups=document.allowed_groups,
             )
         except Exception as exc:
             # In hybrid mode, log warning but continue; in azure-only mode, fail hard

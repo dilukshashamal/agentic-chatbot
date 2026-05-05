@@ -35,6 +35,7 @@ class AzureAISearchService:
     FIELD_CHUNK_INDEX = "chunk_index"
     FIELD_SOURCE = "source"
     FIELD_PAGE_NUMBER = "page_number"
+    FIELD_ALLOWED_GROUPS = "allowed_groups"
     FIELD_CONTENT = "content"
     FIELD_CONTENT_VECTOR = "content_vector"
 
@@ -94,6 +95,11 @@ class AzureAISearchService:
                 SimpleField(name=self.FIELD_PAGE_NUMBER, type=SearchFieldDataType.Int32, filterable=True, sortable=True),
                 SearchableField(name=self.FIELD_CONTENT, type=SearchFieldDataType.String),
                 SearchField(
+                    name=self.FIELD_ALLOWED_GROUPS,
+                    type=SearchFieldDataType.Collection(SearchFieldDataType.String),
+                    filterable=True,
+                ),
+                SearchField(
                     name=self.FIELD_CONTENT_VECTOR,
                     type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
                     searchable=True,
@@ -139,6 +145,7 @@ class AzureAISearchService:
         source_name: str,
         chunks: list[LCDocument],
         embeddings: list[list[float]],
+        allowed_groups: list[str] | None = None,
     ) -> None:
         if len(chunks) != len(embeddings):
             raise RuntimeError("Chunk and embedding counts must match for Azure AI Search upsert.")
@@ -159,6 +166,7 @@ class AzureAISearchService:
                     self.FIELD_PAGE_NUMBER: chunk.metadata.get("page_number"),
                     self.FIELD_CONTENT: chunk.page_content,
                     self.FIELD_CONTENT_VECTOR: embedding,
+                    self.FIELD_ALLOWED_GROUPS: allowed_groups or [],
                 }
             )
 
@@ -172,6 +180,7 @@ class AzureAISearchService:
         *,
         fetch_k: int,
         document_id: UUID | None = None,
+        allowed_groups: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         self.ensure_index_exists()
         client = self._search_client()
@@ -182,9 +191,18 @@ class AzureAISearchService:
             fields=self.FIELD_CONTENT_VECTOR,
         )
 
-        filter_value = None
+        filters = []
         if document_id is not None:
-            filter_value = f"{self.FIELD_DOCUMENT_ID} eq '{document_id}'"
+            filters.append(f"{self.FIELD_DOCUMENT_ID} eq '{document_id}'")
+            
+        if allowed_groups is not None:
+            if not allowed_groups:
+                filters.append(f"not {self.FIELD_ALLOWED_GROUPS}/any()")
+            else:
+                group_conditions = " or ".join(f"g eq '{g}'" for g in allowed_groups)
+                filters.append(f"(not {self.FIELD_ALLOWED_GROUPS}/any() or {self.FIELD_ALLOWED_GROUPS}/any(g: {group_conditions}))")
+                
+        filter_value = " and ".join(filters) if filters else None
 
         try:
             results = client.search(

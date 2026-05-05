@@ -237,6 +237,7 @@ class RAGService:
             query=payload.query,
             top_k=top_k,
             document_id=payload.document_id,
+            allowed_groups=payload.allowed_groups,
         )
 
         if not retrieved_chunks:

@@ -34,6 +34,7 @@ class Retriever(Protocol):
         *,
         embedding_model: str | None = None,
         retrieval_overrides: dict[str, float | int] | None = None,
+        allowed_groups: list[str] | None = None,
     ) -> list[RetrievedChunk]:
         ...
 
@@ -64,6 +65,7 @@ class PgVectorRetriever:
         *,
         embedding_model: str | None = None,
         retrieval_overrides: dict[str, float | int] | None = None,
+        allowed_groups: list[str] | None = None,
     ) -> list[RetrievedChunk]:
         overrides = retrieval_overrides or {}
         query_tokens = tokenize(query)
@@ -79,6 +81,20 @@ class PgVectorRetriever:
         )
         if document_id is not None:
             statement = statement.where(DocumentChunkRecord.document_id == document_id)
+
+        if allowed_groups is not None:
+            from sqlalchemy.dialects.postgresql import ARRAY
+            from sqlalchemy import cast, String, or_, func
+            
+            if not allowed_groups:
+                statement = statement.where(func.jsonb_array_length(DocumentRecord.allowed_groups) == 0)
+            else:
+                statement = statement.where(
+                    or_(
+                        func.jsonb_array_length(DocumentRecord.allowed_groups) == 0,
+                        DocumentRecord.allowed_groups.op('?|')(cast(allowed_groups, ARRAY(String)))
+                    )
+                )
 
         rows = self.session.execute(statement).all()
 
@@ -138,6 +154,7 @@ class AzureSearchRetriever:
         *,
         embedding_model: str | None = None,
         retrieval_overrides: dict[str, float | int] | None = None,
+        allowed_groups: list[str] | None = None,
     ) -> list[RetrievedChunk]:
         overrides = retrieval_overrides or {}
         fetch_k = int(overrides.get("retriever_fetch_k", self.settings.retriever_fetch_k))
@@ -148,6 +165,7 @@ class AzureSearchRetriever:
             query_embedding=query_embedding,
             fetch_k=fetch_k,
             document_id=document_id,
+            allowed_groups=allowed_groups,
         )
 
         retrieved: list[RetrievedChunk] = []
@@ -197,6 +215,7 @@ class HybridRetriever:
         *,
         embedding_model: str | None = None,
         retrieval_overrides: dict[str, float | int] | None = None,
+        allowed_groups: list[str] | None = None,
     ) -> list[RetrievedChunk]:
         pg_chunks = self.pg.retrieve(
             query=query,
@@ -204,6 +223,7 @@ class HybridRetriever:
             document_id=document_id,
             embedding_model=embedding_model,
             retrieval_overrides=retrieval_overrides,
+            allowed_groups=allowed_groups,
         )
         az_chunks = self.azure.retrieve(
             query=query,
@@ -211,6 +231,7 @@ class HybridRetriever:
             document_id=document_id,
             embedding_model=embedding_model,
             retrieval_overrides=retrieval_overrides,
+            allowed_groups=allowed_groups,
         )
 
         merged: dict[str, RetrievedChunk] = {}
