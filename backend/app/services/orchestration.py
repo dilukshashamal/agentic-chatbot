@@ -84,6 +84,7 @@ class AgentState(TypedDict, total=False):
     retrieved_chunks: list[RetrievedChunk]
     document_result: dict[str, Any]
     analytical_result: dict[str, Any]
+    devils_advocate_result: dict[str, Any]
     tool_result: dict[str, Any]
     citation_result: dict[str, Any]
     final_answer: str
@@ -272,6 +273,7 @@ class MultiAgentOrchestrator:
             ],
             "document_result": state.get("document_result", {}),
             "analytical_result": state.get("analytical_result", {}),
+            "devils_advocate_result": state.get("devils_advocate_result", {}),
             "tool_result": state.get("tool_result", {}),
             "citation_result": state.get("citation_result", {}),
             "final_answer": state.get("final_answer"),
@@ -623,6 +625,38 @@ class MultiAgentOrchestrator:
             }
         return state
 
+    def _devils_advocate_agent(self, state: AgentState) -> AgentState:
+        analytical_result = state.get("analytical_result", {})
+        if not analytical_result.get("analysis"):
+            state["devils_advocate_result"] = {
+                "critique": "",
+                "weaknesses": [],
+                "notes": ["No analytical strategy was provided to critique."],
+            }
+            return state
+
+        chunks = state.get("retrieved_chunks", [])
+        
+        system_prompt = (
+            "You are the Devil's Advocate agent. Your sole purpose is to ruthlessly critique the draft analytical strategy. "
+            "Find loopholes, contradictory precedents, or weaknesses in the logic. "
+            "Return JSON with keys: critique, weaknesses, notes."
+        )
+        human_prompt = (
+            f"Question: {state['question']}\n"
+            f"Retrieved context:\n{self._build_context(chunks)}\n\n"
+            f"Draft Analytical Strategy:\n{json.dumps(analytical_result)}"
+        )
+        try:
+            state["devils_advocate_result"] = self._invoke_json_with_state(state, system_prompt, human_prompt)
+        except Exception:
+            state["devils_advocate_result"] = {
+                "critique": "Failed to generate a rigorous red-team critique.",
+                "weaknesses": ["Potential unverified assumptions in the draft."],
+                "notes": ["Fallback Devil's Advocate critique was used."],
+            }
+        return state
+
     @staticmethod
     def _safe_math(expression: str) -> float:
         allowed_names = {name: getattr(math, name) for name in ["ceil", "floor", "sqrt", "log", "sin", "cos", "tan"]}
@@ -870,6 +904,7 @@ class MultiAgentOrchestrator:
         chunks = state.get("retrieved_chunks", [])
         doc_result = state.get("document_result", {})
         analytical_result = state.get("analytical_result", {})
+        devils_advocate_result = state.get("devils_advocate_result", {})
         tool_result = state.get("tool_result", {})
         support = self._grounding_assessment(state["question"], chunks)
 
@@ -890,6 +925,7 @@ class MultiAgentOrchestrator:
                             *([self.memory.provider.note] if self.memory.provider.note else []),
                             *doc_result.get("notes", []),
                             *analytical_result.get("notes", []),
+                            *devils_advocate_result.get("notes", []),
                         ]
                     )
                 ),
@@ -933,6 +969,7 @@ class MultiAgentOrchestrator:
             f"Conversation memory: {state.get('memory_summary', 'None')}\n"
             f"Document summary: {json.dumps(doc_result)}\n"
             f"Analytical result: {json.dumps(analytical_result)}\n"
+            f"Devil's Advocate critique: {json.dumps(devils_advocate_result)}\n"
             f"Tool result: {json.dumps(tool_result)}\n"
             f"Citation result: {json.dumps(state.get('citation_result', {}))}"
         )
@@ -950,7 +987,7 @@ class MultiAgentOrchestrator:
                     float(state.get("citation_result", {}).get("confidence", 0.0)),
                     self._retrieval_confidence(chunks[:2]),
                 ),
-                "system_notes": doc_result.get("notes", []) + analytical_result.get("notes", []),
+                "system_notes": doc_result.get("notes", []) + analytical_result.get("notes", []) + devils_advocate_result.get("notes", []),
             }
 
         grounded = bool(final_result.get("grounded")) and bool(citations)
@@ -1096,6 +1133,7 @@ class MultiAgentOrchestrator:
         graph.add_node("router", lambda state: self._router_agent(state))
         graph.add_node("document", lambda state: self._run_with_retry("document", state, self._document_agent))
         graph.add_node("analytical", lambda state: self._run_with_retry("analytical", state, self._analytical_agent))
+        graph.add_node("devils_advocate", lambda state: self._run_with_retry("devils_advocate", state, self._devils_advocate_agent))
         graph.add_node("tool", lambda state: self._run_with_retry("tool", state, self._tool_agent))
         graph.add_node("citation", lambda state: self._run_with_retry("citation", state, self._citation_agent))
         graph.add_node("finalize", lambda state: self._run_with_retry("finalize", state, self._finalize))
@@ -1112,7 +1150,10 @@ class MultiAgentOrchestrator:
                 "citation": "citation",
             },
         )
-        for node_name in ["document", "analytical", "tool"]:
+        
+        graph.add_edge("analytical", "devils_advocate")
+        
+        for node_name in ["document", "devils_advocate", "tool"]:
             graph.add_conditional_edges(
                 node_name,
                 self._next_agent,
@@ -1138,6 +1179,7 @@ class MultiAgentOrchestrator:
                 state = self._run_with_retry("document", state, self._document_agent)
             elif next_agent == "analytical":
                 state = self._run_with_retry("analytical", state, self._analytical_agent)
+                state = self._run_with_retry("devils_advocate", state, self._devils_advocate_agent)
             elif next_agent == "tool":
                 state = self._run_with_retry("tool", state, self._tool_agent)
             else:
