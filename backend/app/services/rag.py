@@ -138,6 +138,7 @@ class RAGService:
             citations.append(
                 Citation(
                     chunk_id=chunk.chunk_id,
+                    document_id=chunk.document_id,
                     source=chunk.source,
                     page=chunk.page_number,
                     score=chunk.score,

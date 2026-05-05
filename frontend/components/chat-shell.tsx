@@ -13,7 +13,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import logo from "../images/logo.png";
-import { askQuestion, ChatResponse, fetchStatus, SystemStatus } from "../lib/api";
+import { API_BASE_URL, askQuestion, ChatResponse, Citation, fetchStatus, SystemStatus } from "../lib/api";
 
 type Message = {
   id: string;
@@ -113,6 +113,7 @@ export function ChatShell() {
   const [summary, setSummary] = useState("");
   const [followUp, setFollowUp] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [isPending, startTransition] = useTransition();
   const chatEndRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLTextAreaElement>(null);
@@ -375,6 +376,11 @@ export function ChatShell() {
                             <span className={`msg-chip ${message.response.grounded ? "chip-grounded" : "chip-ungrounded"}`}>
                               {message.response.grounded ? "Knowledge-base supported" : "Needs attorney review"}
                             </span>
+                            {message.response.citations?.map((c) => (
+                              <button key={c.chunk_id} className="msg-citation-btn" onClick={() => setActiveCitation(c)}>
+                                [{c.source} - p.{c.page || '?'}]
+                              </button>
+                            ))}
                           </div>
                         )}
                         <p className="msg-answer">{message.content}</p>
@@ -437,6 +443,28 @@ export function ChatShell() {
           )}
         </section>
       </main>
+
+      {activeCitation && (
+        <div className="citation-modal-backdrop" onClick={() => setActiveCitation(null)}>
+          <div className="citation-modal" onClick={(e) => e.stopPropagation()}>
+            <header className="citation-modal-header">
+              <h3>Source: {activeCitation.source}</h3>
+              <button className="citation-close-btn" onClick={() => setActiveCitation(null)}>Close</button>
+            </header>
+            <div className="citation-excerpt">
+              <strong>Relevant Excerpt:</strong>
+              <p>{activeCitation.excerpt}</p>
+            </div>
+            <div className="citation-pdf-container">
+              <iframe 
+                src={`${API_BASE_URL}/api/v1/documents/${activeCitation.document_id}/file#page=${activeCitation.page || 1}`}
+                className="citation-pdf-viewer"
+                title={`PDF Viewer for ${activeCitation.source}`}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

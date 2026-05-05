@@ -2,6 +2,7 @@ from uuid import UUID
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.admin_auth import require_admin
@@ -109,3 +110,22 @@ def delete_document(
         raise HTTPException(status_code=500, detail=f"Failed to delete document: {exc}") from exc
 
     return {"message": "Document deleted."}
+
+@router.get("/{document_id}/file")
+def get_document_file(
+    document_id: UUID,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    document = DocumentService(settings, session).get_document(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    if not document.storage_path:
+        raise HTTPException(status_code=404, detail="Document file not found on disk.")
+
+    return FileResponse(
+        path=document.storage_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "inline"},
+    )

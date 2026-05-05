@@ -40,6 +40,7 @@ class ChatRequest(BaseModel):
 
 class Citation(BaseModel):
     chunk_id: str
+    document_id: UUID
     source: str
     page: int | None = None
     score: float = Field(ge=0.0, le=1.0)
