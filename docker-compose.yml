@@ -136,6 +136,8 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+      - cadvisor
+      - postgres-exporter
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -152,6 +154,42 @@ services:
         reservations:
           memory: 256M
 
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: rag-chatbot-cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: rag-chatbot-postgres-exporter
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-rag_chatbot}?sslmode=disable
+    ports:
+      - "9187:9187"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
   grafana:
     image: grafana/grafana:11.2.0
     container_name: rag-chatbot-grafana
@@ -167,6 +205,7 @@ services:
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/infrastructure-dashboards:ro
       - grafana_data:/var/lib/grafana
     deploy:
       resources:

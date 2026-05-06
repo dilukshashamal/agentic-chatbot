@@ -1,0 +1,16 @@
+{
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/grafana/grafana/main/conf/provisioning/datasources/sample.yaml": [
+      "monitoring/grafana/provisioning/datasources/*.yml",
+      "monitoring/grafana/provisioning/datasources/*.yaml"
+    ],
+    "https://raw.githubusercontent.com/grafana/grafana/main/conf/provisioning/dashboards/sample.yaml": [
+      "monitoring/grafana/provisioning/dashboards/*.yml",
+      "monitoring/grafana/provisioning/dashboards/*.yaml"
+    ],
+    "https://json.schemastore.org/prometheus.json": [
+      "monitoring/prometheus/*.yml",
+      "monitoring/prometheus/*.yaml"
+    ]
+  }
+}
